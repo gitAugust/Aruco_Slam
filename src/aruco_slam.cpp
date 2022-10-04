@@ -1,22 +1,37 @@
-#include <aruco_slam/aruco_slam.h>
+#include "aruco_slam/aruco_slam.h"
 
-ArucoSlam::ArucoSlam(const cv::Mat &K, const cv::Mat &dist,
-                                     const double &kl, const double kr, const double &b,
-                                     const geometry_msgs::TransformStamped &transformStamped_r2c,
-                                     const double &k, const double &k_r, const double k_phi,
-                                     const int &markers_dictionary, const double &marker_length)
-    : K_(K), dist_(dist), kl_(kl), kr_(kr), b_(b), transformStamped_r2c_(transformStamped_r2c), k_(k), k_r_(k_r), k_phi_(k_phi), markers_dictionary_(markers_dictionary), marker_length_(marker_length)
+ArucoSlam::ArucoSlam(const double &kl, const double kr, const double &b,
+                     const geometry_msgs::TransformStamped &transformStamped_r2c,
+                     const double &k, const double &k_r, const double k_phi,
+                     const int &markers_dictionary, const double &marker_length)
+    : kl_(kl), kr_(kr), b_(b), transformStamped_r2c_(transformStamped_r2c), k_(k), k_r_(k_r), k_phi_(k_phi), markers_dictionary_(markers_dictionary), marker_length_(marker_length)
 {
     is_init_ = false;
-
+    K_ = cv::Mat(3, 3, 6);
+    dist_ = cv::Mat(5, 1, 6);
+    dictionary_ = cv::aruco::getPredefinedDictionary(
+        static_cast<cv::aruco::PREDEFINED_DICTIONARY_NAME>(markers_dictionary_));
     /* 初始时刻机器人位姿为0，绝对准确, 协方差为0 */
     mu_.resize(3, 1);
     mu_.setZero();
     sigma_.resize(3, 3);
     sigma_.setZero();
+}
 
+ArucoSlam::ArucoSlam(const struct ArucoSlamIniteData &inite_data)
+    : kl_(inite_data.kl), kr_(inite_data.kr), b_(inite_data.b), transformStamped_r2c_(inite_data.transformStamped_r2c), k_(inite_data.k),
+      k_r_(inite_data.k_r), k_phi_(inite_data.k_phi), markers_dictionary_(inite_data.markers_dictionary), marker_length_(inite_data.marker_length)
+{
+    is_init_ = false;
+    K_ = cv::Mat(3, 3, 6);
+    dist_ = cv::Mat(5, 1, 6);
     dictionary_ = cv::aruco::getPredefinedDictionary(
         static_cast<cv::aruco::PREDEFINED_DICTIONARY_NAME>(markers_dictionary_));
+    /* State and Covariance */
+    mu_.resize(3, 1);
+    mu_.setZero();
+    sigma_.resize(3, 3);
+    sigma_.setZero();    
 }
 
 void ArucoSlam::addEncoder(const double &wl, const double &wr)
@@ -141,18 +156,18 @@ void ArucoSlam::addImage(const cv::Mat &img)
             Eigen::MatrixXd Ht = Hv * F;
             Eigen::MatrixXd K = sigma_ * Ht.transpose() * (Ht * sigma_ * Ht.transpose() + Q).inverse();
             // if(K.norm()>1){
-            ROS_INFO_STREAM("sigma_:" << sigma_ << std::endl
-                                      << "Ht:" << Ht << std::endl
-                                      << "Q:" << Q << std::endl
-                                      << "i:" << i << std::endl);
+            // ROS_INFO_STREAM("sigma_:" << sigma_ << std::endl
+            //                           << "Ht:" << Ht << std::endl
+            //                           << "Q:" << Q << std::endl
+            //                           << "i:" << i << std::endl);
             // }
             // double phi_hat = atan2(delta_y, delta_x) - theta;
             // normAngle(phi_hat);
 
-            ROS_INFO_STREAM("z_hat:" << z_hat << std::endl
-                                     << "z:" << z << std::endl
-                                     << "k:" << K << std::endl
-                                     << "mu:" << mu_ << std::endl);
+            // ROS_INFO_STREAM("z_hat:" << z_hat << std::endl
+            //                          << "z:" << z << std::endl
+            //                          << "k:" << K << std::endl
+            //                          << "mu:" << mu_ << std::endl);
 
             mu_ = mu_ + K * (z - z_hat);
             Eigen::MatrixXd I = Eigen::MatrixXd::Identity(N, N);
@@ -216,7 +231,7 @@ void ArucoSlam::addImage(const cv::Mat &img)
             sigma_ = tmp_sigma;
 
             /***** 添加id *****/
-            aruco_id_map.insert(std::pair<int, int>{ob.aruco_id_, (mu_.rows() - 3)/2-1});
+            aruco_id_map.insert(std::pair<int, int>{ob.aruco_id_, (mu_.rows() - 3) / 2 - 1});
 
             ROS_INFO_STREAM("state:" << mu_ << std::endl
                                      << "obs:id" << ob.aruco_id_ << "obs:x,y" << ob.x_ << " " << ob.y_ << std::endl
@@ -224,18 +239,21 @@ void ArucoSlam::addImage(const cv::Mat &img)
         } // add new landmark
     }     // for all observation
 
+    get_detected_map().markers.clear();
     for (int i = 0; i < (mu_.rows() - 3) / 2; i++)
     {
-        int x = mu_(i * 2 + 3, 0);
-        int y = mu_(i * 2 + 4, 0);
+
+        double x = mu_(i * 2 + 3, 0);
+        double y = mu_(i * 2 + 4, 0);
         visualization_msgs::Marker marker;
         std_msgs::ColorRGBA color;
         color.a = 0.5;
         color.b = 1;
         color.g = 0.5;
         color.r = 1;
-        CYLINDERmarker_generate(i, x, y, 0.3, marker, color, ros::Duration(0));
-        detectedMAParray_.markers.push_back(marker);
+        ROS_INFO_STREAM("x:" << x << "y:" << y << std::endl);
+        CylinderMarkerGenerate(i, x, y, 0.3, color, ros::Duration(1), marker);
+        get_detected_map().markers.push_back(marker);
     }
 }
 
@@ -324,14 +342,12 @@ void ArucoSlam::loadMap(std::string filename)
 
 void ArucoSlam::clearMarkers()
 {
-    // board_->ids.clear();
-    // board_->objPoints.clear();
     myMap_.clear();
-    mapmarkerarray_.markers.clear();
+    real_map_.markers.clear();
 }
 
 void ArucoSlam::addMarker(int id, double length, double x, double y, double z,
-                                  double yaw, double pitch, double roll)
+                          double yaw, double pitch, double roll)
 {
     // Create transform
     tf2::Quaternion q;
@@ -373,7 +389,7 @@ void ArucoSlam::addMarker(int id, double length, double x, double y, double z,
     color.g = 1;
     color.r = 1;
     marker_generate(id, length, x, y, z, q, marker, color);
-    mapmarkerarray_.markers.push_back(marker);
+    real_map_.markers.push_back(marker);
 }
 
 bool ArucoSlam::marker_generate(int id, double length, double x, double y, double z, tf2::Quaternion q, visualization_msgs::Marker &marker_, std_msgs::ColorRGBA color, ros::Duration lifetime)
@@ -394,19 +410,24 @@ bool ArucoSlam::marker_generate(int id, double length, double x, double y, doubl
     return true;
 }
 
-bool ArucoSlam::CYLINDERmarker_generate(int id, double x, double y, double z, visualization_msgs::Marker &marker_, std_msgs::ColorRGBA color, ros::Duration lifetime)
+bool ArucoSlam::CylinderMarkerGenerate(const int &id, const double &x, const double &y, const double &z, const std_msgs::ColorRGBA &color, const ros::Duration &lifetime, visualization_msgs::Marker &marker_)
 {
     marker_.id = id;
     marker_.header.frame_id = "world";
     marker_.type = visualization_msgs::Marker::CYLINDER;
-    marker_.scale.x = 0.2;
-    marker_.scale.y = 0.2;
+    marker_.scale.x = 0.1;
+    marker_.scale.y = 0.1;
     marker_.scale.z = 0.2;
 
     marker_.color = color;
     marker_.pose.position.x = x;
     marker_.pose.position.y = y;
     marker_.pose.position.z = z;
+
+    marker_.pose.orientation.w = 1;
+    marker_.pose.orientation.x = 0;
+    marker_.pose.orientation.y = 0;
+    marker_.pose.orientation.z = 0;
 
     marker_.lifetime = lifetime;
     return true;
@@ -419,7 +440,7 @@ int ArucoSlam::getObservations(const cv::Mat &img, std::vector<Observation> &obs
     std::vector<cv::Vec3d> rvs, tvs;
     cv::aruco::detectMarkers(img, dictionary_, marker_corners, IDs);
     // ROS_INFO("oringal marks.size : %lu \n", detectedmarkerarray_.markers.size());
-    detectedmarkerarray_.markers.clear();
+    detected_markers_.markers.clear();
     // ROS_INFO("cleared marks.size : %lu \n", detectedmarkerarray_.markers.size());
     // cv::aruco::detectMarkers(img, dictionary_, marker_corners, IDs, parameters_, rejected);
     cv::aruco::estimatePoseSingleMarkers(marker_corners, marker_length_, camera_matrix_, dist_coeffs_, rvs, tvs);
@@ -436,14 +457,13 @@ int ArucoSlam::getObservations(const cv::Mat &img, std::vector<Observation> &obs
     // for (size_t i = 0; i < IDs.size(); i++)
     //     cv::aruco::drawAxis(marker_img_, K_, dist_, rvs[i], tvs[i], 0.07);
 
-    /*  筛选距离较近的使用 */
-    const float DistTh = 2.5; // 3 m
+    const float USEFUL_DISTANCE_THRESHOLD = 2.5; // 3 m
 
     for (size_t i = 0; i < IDs.size(); i++)
     {
         // float dist = cv::norm<double>(tvs[i]); //计算距离
         float dist = tvs[i][2];
-        if (dist > DistTh)
+        if (dist > USEFUL_DISTANCE_THRESHOLD)
         {
             cv::aruco::drawAxis(marker_img_, K_, dist_, rvs[i], tvs[i], 0.07);
             continue;
@@ -461,7 +481,7 @@ int ArucoSlam::getObservations(const cv::Mat &img, std::vector<Observation> &obs
         marker_generate(IDs[i], marker_length_, tvs[i][0], tvs[i][1], tvs[i][2], _transform.getRotation(), _marker, color, ros::Duration(0.1));
         tf2::doTransform(_marker.pose, _marker.pose, transformStamped_r2c_);
         _marker.header.frame_id = "base_link";
-        detectedmarkerarray_.markers.push_back(_marker);
+        detected_markers_.markers.push_back(_marker);
 
         cv::aruco::drawAxis(marker_img_, camera_matrix_, dist_coeffs_, rvs[i], tvs[i], 0.07);
 
@@ -477,7 +497,7 @@ int ArucoSlam::getObservations(const cv::Mat &img, std::vector<Observation> &obs
         //     0., 0., 0., 1.;
 
         Eigen::Affine3d transform_matrix = tf2::transformToEigen(transformStamped_r2c_);
-        ROS_INFO_STREAM_ONCE("transformStamped_r2c_"<<transformStamped_r2c_<<std::endl<<"tvsc:"<<tvec<<std::endl<<"rvec:"<<rvec<<std::endl);
+        // ROS_INFO_STREAM_ONCE("transformStamped_r2c_"<<transformStamped_r2c_<<std::endl<<"tvsc:"<<tvec<<std::endl<<"rvec:"<<rvec<<std::endl);
         // Eigen::Matrix4d T_r_c = transform_matrix.matrix();
         // Eigen::Matrix4d T_r_m = T_r_c * T_c_m; // robot->camera
 
@@ -488,10 +508,10 @@ int ArucoSlam::getObservations(const cv::Mat &img, std::vector<Observation> &obs
         // double phi = atan2(y, x);
         Eigen::Matrix2d covariance;
 
-        double x = tvec[2] + transform_matrix(0,3);
+        double x = tvec[2] + transform_matrix(0, 3);
         double y = -tvec[0] + transform_matrix(1, 3);
         int aruco_id = IDs[i];
-        calculate_covariance(tvec, rvec, marker_corners[i], covariance);
+        CalculateCovariance(tvec, rvec, marker_corners[i], covariance);
         // /* 加入到观测vector */
         if (covariance.norm() > 1)
             continue;
@@ -587,7 +607,8 @@ void ArucoSlam::normAngle(double &angle)
 // 暴力搜素
 bool ArucoSlam::checkLandmark(const int &aruco_id, int &landmark_idx)
 {
-    if(!aruco_id_map.empty() && aruco_id_map.end() != aruco_id_map.find(aruco_id)){
+    if (!aruco_id_map.empty() && aruco_id_map.end() != aruco_id_map.find(aruco_id))
+    {
         landmark_idx = aruco_id_map.at(aruco_id);
         // ROS_INFO_STREAM("map:"<<aruco_id_map.at(aruco_id));
         return true;
@@ -595,7 +616,7 @@ bool ArucoSlam::checkLandmark(const int &aruco_id, int &landmark_idx)
     return false;
 }
 
-void ArucoSlam::calculate_covariance(const cv::Vec3d &tvec, const cv::Vec3d &rvec, const std::vector<cv::Point2f> &marker_corners, Eigen::Matrix2d &covariance)
+void ArucoSlam::CalculateCovariance(const cv::Vec3d &tvec, const cv::Vec3d &rvec, const std::vector<cv::Point2f> &marker_corners, Eigen::Matrix2d &covariance)
 {
 
     std::vector<cv::Point2f> projectedPoints;
@@ -628,7 +649,7 @@ void ArucoSlam::calculate_covariance(const cv::Vec3d &tvec, const cv::Vec3d &rve
     covariance << rerror + 0.01, 0, 0, rerror + 0.01;
 }
 
-void fillTransform(tf2::Transform &transform_, const cv::Vec3d &rvec, const cv::Vec3d &tvec)
+void ArucoSlam::fillTransform(tf2::Transform &transform_, const cv::Vec3d &rvec, const cv::Vec3d &tvec)
 {
     cv::Mat rot(3, 3, CV_64FC1);
     // cv::Mat Rvec64;

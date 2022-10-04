@@ -13,8 +13,21 @@
 #include "tf2_ros/transform_listener.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include <tf2_eigen/tf2_eigen.h>
-
-void fillTransform(tf2::Transform &transform_, const cv::Vec3d &rvec, const cv::Vec3d &tvec);
+struct ArucoSlamIniteData
+{   
+    cv::Mat K;
+    cv::Mat dist;
+    double kl;
+    double kr;
+    double b;
+    geometry_msgs::TransformStamped transformStamped_r2c;
+    double k;
+    double k_r;
+    double k_phi;
+    int markers_dictionary;
+    double marker_length;
+    std::string image_topic_name, encoder_topic_name, map_f;
+};
 
 class Observation
 {
@@ -30,11 +43,12 @@ public:
 class ArucoSlam
 {
 public:
-    ArucoSlam(const cv::Mat &K, const cv::Mat &dist,
-                      const double &kl, const double kr, const double &b,
-                      const geometry_msgs::TransformStamped &transformStamped_r2c,
-                      const double &k, const double &k_r, const double k_phi,
-                      const int &markers_dictionary, const double &marker_length);
+
+    ArucoSlam(const double &kl, const double kr, const double &b,
+              const geometry_msgs::TransformStamped &transformStamped_r2c,
+              const double &k, const double &k_r, const double k_phi,
+              const int &markers_dictionary, const double &marker_length);
+    ArucoSlam(const struct ArucoSlamIniteData &inite_data);
     /*parameters
     cv::Mat         K
     cv::Mat         dist
@@ -48,10 +62,15 @@ public:
     int             DICTIONARY_NUM  Opencv aruco 预定以字典的编号
     double          marker_length   Aruco markers的大小(m)
     */
-    void addEncoder(const double &el, const double &er); //加入编码器数据进行运动更新
-    void addImage(const cv::Mat &img);                   // 加入图像数据进行观测更新
+    void addEncoder(const double &el, const double &er); //add encoder data and update
+    void addImage(const cv::Mat &img);                   //add image data and update
     void loadMap(std::string filename);
-
+    void fillTransform(tf2::Transform &transform_, const cv::Vec3d &rvec, const cv::Vec3d &tvec);
+    void setcameraparameters(const std::pair<cv::Mat, cv::Mat> &cameraparameters)
+    {
+        camera_matrix_ = cameraparameters.first;
+        dist_coeffs_ = cameraparameters.second;
+    }
     visualization_msgs::MarkerArray toRosMarkers(double scale); //将路标点转换成ROS的marker格式，用于发布显示
     geometry_msgs::PoseWithCovarianceStamped toRosPose();       //将机器人位姿转化成ROS的pose格式，用于发布显示
 
@@ -59,33 +78,30 @@ public:
     Eigen::MatrixXd &sigma() { return sigma_; }
     cv::Mat markedImg() { return marker_img_; }
 
-    visualization_msgs::MarkerArray detectedMAParray_;
-    visualization_msgs::MarkerArray get_mapmarkerarray() { return mapmarkerarray_; }
-    visualization_msgs::MarkerArray get_detectedmarkerarray() { return detectedmarkerarray_; }
-    void setcameraparameters(const cv::Mat &camera_matrix, const cv::Mat &dist_coeffs)
-    {
-        camera_matrix_ = camera_matrix;
-        dist_coeffs_ = dist_coeffs;
-    }
+    visualization_msgs::MarkerArray get_real_map() { return real_map_; }
+    visualization_msgs::MarkerArray &get_detected_map() { return detected_map_; }
+    visualization_msgs::MarkerArray get_detected_markers() { return detected_markers_; }
+
 
 private:
     int getObservations(const cv::Mat &img, std::vector<Observation> &obs);
     void normAngle(double &angle);
     bool checkLandmark(const int &aruco_id, int &landmark_idx);
     void clearMarkers();
-    std::map<int, int> aruco_id_map; //pair<int, int>{aruco_id, position_i}
+    std::map<int, int> aruco_id_map; // pair<int, int>{aruco_id, position_i}
 
-    bool CYLINDERmarker_generate(int id, double x, double y, double z, visualization_msgs::Marker &marker_, std_msgs::ColorRGBA color, ros::Duration lifetime);
+    bool CylinderMarkerGenerate(const int &id, const double &x, const double &y, const double &z, const std_msgs::ColorRGBA &color,
+                                const ros::Duration &lifetime, visualization_msgs::Marker &marker_);
     bool marker_generate(int id, double length, double x, double y, double z, tf2::Quaternion q,
                          visualization_msgs::Marker &marker_, std_msgs::ColorRGBA color, ros::Duration lifetime = ros::Duration(0));
     void addMarker(int id, double length, double x, double y, double z,
                    double yaw, double pitch, double roll);
-    void calculate_covariance(const cv::Vec3d &tvec, const cv::Vec3d &rvec, const std::vector<cv::Point2f> &marker_corners, Eigen::Matrix2d &covariance);
+    void CalculateCovariance(const cv::Vec3d &tvec, const cv::Vec3d &rvec, const std::vector<cv::Point2f> &marker_corners, Eigen::Matrix2d &covariance);
     /* 系统状态 */
     bool is_init_;
 
     /* 系统配置参数 */
-    cv::Mat K_, dist_;   //　相机内参数
+    cv::Mat K_, dist_;
     double kl_, kr_, b_; // 里程计参数
     // Eigen::Matrix4d T_r_c_;                              // 机器人外参数
     geometry_msgs::TransformStamped transformStamped_r2c_;
@@ -107,10 +123,10 @@ private:
     Eigen::MatrixXd sigma_;      //方差
     std::vector<int> aruco_ids_; //对应于每个路标的aruco码id
 
-    // cv::Ptr<cv::aruco::Board> board_;
     std::map<int, tf2::Vector3> myMap_;
-    visualization_msgs::MarkerArray mapmarkerarray_;
-    visualization_msgs::MarkerArray detectedmarkerarray_;
+    visualization_msgs::MarkerArray real_map_;
+    visualization_msgs::MarkerArray detected_map_;
+    visualization_msgs::MarkerArray detected_markers_;
 
     cv::Ptr<cv::aruco::DetectorParameters> parameters_;
     cv::Mat camera_matrix_, dist_coeffs_;
