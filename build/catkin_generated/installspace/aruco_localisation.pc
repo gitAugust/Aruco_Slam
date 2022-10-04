@@ -1,0 +1,8 @@
+prefix=/usr/local
+
+Name: aruco_localisation
+Description: Description of aruco_localisation
+Version: 0.0.0
+Cflags: -I${prefix}/include
+Libs: -L${prefix}/lib -laruco_localisation
+Requires: 

@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/liangyichen/catkin_ws/src/aruco_slam/build/devel/setup.sh
