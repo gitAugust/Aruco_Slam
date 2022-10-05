@@ -82,8 +82,7 @@ void ImageCallback(const sensor_msgs::ImageConstPtr &img_ptr, const sensor_msgs:
 }
 
 void EncoderCallback(const std_msgs::Float32MultiArray::ConstPtr &en_ptr)
-{
-
+{   
     std::vector<float> encoder_data = en_ptr->data;
     double enl = encoder_data.at(0);
     double enr = encoder_data.at(1);

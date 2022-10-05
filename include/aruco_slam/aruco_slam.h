@@ -15,6 +15,19 @@
 #include <tf2_eigen/tf2_eigen.h>
 struct ArucoSlamIniteData
 {   
+    /*parameters
+    cv::Mat         K
+    cv::Mat         dist
+    double          kl, kr           小车左右轮的半径
+    double          b                小车底盘的一半距离(m)
+    Eigen::Matrix4d T_r_c            相机与机器人的相对位姿 机器人->相机
+    geometry_msgs::TransformStamped transformStamped_r2c 相机与机器人的相对位姿 机器人->相机
+    double          k
+    double          k_r             相机观测误差和距离的系数
+    double          k_phi           相机观测误差和角度的系数
+    int             DICTIONARY_NUM  Opencv aruco 预定以字典的编号
+    double          marker_length   Aruco markers的大小(m)
+    */
     cv::Mat K;
     cv::Mat dist;
     double kl;
@@ -33,11 +46,13 @@ class Observation
 {
 public:
     Observation() {}
-    Observation(const int &aruco_id, const double &x, const double &y, const Eigen::Matrix2d &covariance) : aruco_id_(aruco_id), x_(x), y_(y), covariance_(covariance) {}
-    Eigen::Matrix2d covariance_;
+    Observation(const int &aruco_id, const double &x, const double &y, const double &theta,const Eigen::Matrix3d &covariance) 
+    : aruco_id_(aruco_id), x_(x), y_(y), theta_(theta), covariance_(covariance) {}
+    Eigen::Matrix3d covariance_;
     int aruco_id_;
     double x_;
     double y_;
+    double theta_;
 }; // class Observation
 
 class ArucoSlam
@@ -49,19 +64,7 @@ public:
               const double &k, const double &k_r, const double k_phi,
               const int &markers_dictionary, const double &marker_length);
     ArucoSlam(const struct ArucoSlamIniteData &inite_data);
-    /*parameters
-    cv::Mat         K
-    cv::Mat         dist
-    double          kl, kr           小车左右轮的半径
-    double          b                小车底盘的一半距离(m)
-    Eigen::Matrix4d T_r_c            相机与机器人的相对位姿 机器人->相机
-    geometry_msgs::TransformStamped transformStamped_r2c 相机与机器人的相对位姿 机器人->相机
-    double          k
-    double          k_r             相机观测误差和距离的系数
-    double          k_phi           相机观测误差和角度的系数
-    int             DICTIONARY_NUM  Opencv aruco 预定以字典的编号
-    double          marker_length   Aruco markers的大小(m)
-    */
+    
     void addEncoder(const double &el, const double &er); //add encoder data and update
     void addImage(const cv::Mat &img);                   //add image data and update
     void loadMap(std::string filename);
@@ -74,7 +77,7 @@ public:
     visualization_msgs::MarkerArray toRosMarkers(double scale); //将路标点转换成ROS的marker格式，用于发布显示
     geometry_msgs::PoseWithCovarianceStamped toRosPose();       //将机器人位姿转化成ROS的pose格式，用于发布显示
 
-    Eigen::MatrixXd &mu() { return mu_; }
+    Eigen::VectorXd &mu() { return mu_; }
     Eigen::MatrixXd &sigma() { return sigma_; }
     cv::Mat markedImg() { return marker_img_; }
 
@@ -96,7 +99,7 @@ private:
                          visualization_msgs::Marker &marker_, std_msgs::ColorRGBA color, ros::Duration lifetime = ros::Duration(0));
     void addMarker(int id, double length, double x, double y, double z,
                    double yaw, double pitch, double roll);
-    void CalculateCovariance(const cv::Vec3d &tvec, const cv::Vec3d &rvec, const std::vector<cv::Point2f> &marker_corners, Eigen::Matrix2d &covariance);
+    void CalculateCovariance(const cv::Vec3d &tvec, const cv::Vec3d &rvec, const std::vector<cv::Point2f> &marker_corners, Eigen::Matrix3d &covariance);
     /* 系统状态 */
     bool is_init_;
 
@@ -119,7 +122,7 @@ private:
     ros::Time last_time_;
 
     /* 求解的扩展状态 均值 和 协方差 */
-    Eigen::MatrixXd mu_;         //均值
+    Eigen::VectorXd mu_;         //均值
     Eigen::MatrixXd sigma_;      //方差
     std::vector<int> aruco_ids_; //对应于每个路标的aruco码id
 
