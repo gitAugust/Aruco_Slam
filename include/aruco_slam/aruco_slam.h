@@ -8,6 +8,7 @@
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <geometry_msgs/Pose.h>
+#include <geometry_msgs/PoseArray.h>
 
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
@@ -93,9 +94,9 @@ private:
     void clearMarkers();
     std::map<int, int> aruco_id_map; // pair<int, int>{aruco_id, position_i}
 
-    bool CylinderMarkerGenerate(const int &id, const double &x, const double &y, const double &z, const std_msgs::ColorRGBA &color,
+    bool ArrowMarkerGenerate(const int &id, const double &x, const double &y, const double &z, const double &theta, const std_msgs::ColorRGBA &color,
                                 const ros::Duration &lifetime, visualization_msgs::Marker &marker_);
-    bool marker_generate(int id, double length, double x, double y, double z, tf2::Quaternion q,
+    bool GenerateMarker(int id, double length, double x, double y, double z, tf2::Quaternion q,
                          visualization_msgs::Marker &marker_, std_msgs::ColorRGBA color, ros::Duration lifetime = ros::Duration(0));
     void addMarker(int id, double length, double x, double y, double z,
                    double yaw, double pitch, double roll);
@@ -126,7 +127,7 @@ private:
     Eigen::MatrixXd sigma_;      //方差
     std::vector<int> aruco_ids_; //对应于每个路标的aruco码id
 
-    std::map<int, tf2::Vector3> myMap_;
+    // std::map<int, tf2:s:Vector3> myMap_;
     visualization_msgs::MarkerArray real_map_;
     visualization_msgs::MarkerArray detected_map_;
     visualization_msgs::MarkerArray detected_markers_;

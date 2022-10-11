@@ -71,5 +71,9 @@
         "*.ipp": "cpp",
         "forward_list": "cpp",
         "core": "cpp"
-    }
+    },
+    "python.analysis.extraPaths": [
+        "/home/liangyichen/catkin_ws/devel/lib/python2.7/dist-packages",
+        "/opt/ros/melodic/lib/python2.7/dist-packages"
+    ]
 }
