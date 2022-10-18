@@ -48,9 +48,10 @@ class Observation
 public:
     Observation() {}
     Observation(const int &aruco_id, const double &x, const double &y, const double &theta,const Eigen::Matrix3d &covariance) 
-    : aruco_id_(aruco_id), x_(x), y_(y), theta_(theta), covariance_(covariance) {}
+    : aruco_id_(aruco_id), aruco_index_(-1), x_(x), y_(y), theta_(theta), covariance_(covariance) {}
     Eigen::Matrix3d covariance_;
     int aruco_id_;
+    int aruco_index_;
     double x_;
     double y_;
     double theta_;

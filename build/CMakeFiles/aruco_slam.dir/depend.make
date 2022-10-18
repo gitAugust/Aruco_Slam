@@ -6,6 +6,7 @@ CMakeFiles/aruco_slam.dir/src/aruco_slam.cpp.o: ../src/aruco_slam.cpp
 CMakeFiles/aruco_slam.dir/src/aruco_slam.cpp.o: /opt/ros/melodic/include/geometry_msgs/Point.h
 CMakeFiles/aruco_slam.dir/src/aruco_slam.cpp.o: /opt/ros/melodic/include/geometry_msgs/PointStamped.h
 CMakeFiles/aruco_slam.dir/src/aruco_slam.cpp.o: /opt/ros/melodic/include/geometry_msgs/Pose.h
+CMakeFiles/aruco_slam.dir/src/aruco_slam.cpp.o: /opt/ros/melodic/include/geometry_msgs/PoseArray.h
 CMakeFiles/aruco_slam.dir/src/aruco_slam.cpp.o: /opt/ros/melodic/include/geometry_msgs/PoseStamped.h
 CMakeFiles/aruco_slam.dir/src/aruco_slam.cpp.o: /opt/ros/melodic/include/geometry_msgs/PoseWithCovariance.h
 CMakeFiles/aruco_slam.dir/src/aruco_slam.cpp.o: /opt/ros/melodic/include/geometry_msgs/PoseWithCovarianceStamped.h
