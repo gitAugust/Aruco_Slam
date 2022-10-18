@@ -58,7 +58,7 @@ void ArucoSlam::addEncoder(const double &wl, const double &wr)
     Eigen::Matrix<double, 3, 2> wkh;
     wkh << cos_tmp_th, cos_tmp_th, sin_tmp_th, sin_tmp_th, 1 / b_, -1 / b_;
     wkh = (0.5 * kl_ * dt) * wkh;
-    
+
     int N = mu_.rows();
     Eigen::MatrixXd F(N, 3);
     F.setZero();
@@ -67,7 +67,7 @@ void ArucoSlam::addEncoder(const double &wl, const double &wr)
     Hx.block(0, 0, 3, 3) = H_xi;
     Eigen::Matrix2d sigma_u;
     sigma_u << k_ * fabs(wl), 0.0, 0.0, k_ * fabs(wr);
-    Eigen::MatrixXd Qk = wkh*sigma_u*wkh.transpose();
+    Eigen::MatrixXd Qk = wkh * sigma_u * wkh.transpose();
     sigma_ = Hx * sigma_ * Hx.transpose() + F * Qk * F.transpose();
 }
 
@@ -81,31 +81,35 @@ void ArucoSlam::addImage(const cv::Mat &img)
     {
         /* 计算观测方差 */
         Eigen::Matrix3d Rk = ob.covariance_;
+        double &x = mu_(0);
+        double &y = mu_(1);
+        double &theta = mu_(2);
+        double sintheta = sin(theta);
+        double costheta = cos(theta);
         // Q << k_r_ * k_r_ * fabs(ob.x_ * ob.x_) + 0.1, 0.0, 0.0, k_phi_ * k_phi_ * fabs(ob.y_ * ob.y_) + 0.1;
         ROS_INFO_STREAM_ONCE("addImage");
-        int index = -1;                         // 第 i 个路标
-        if (checkLandmark(ob.aruco_id_, index)) // 如果路标已经存在了
+        if (ob.aruco_index_) // 如果路标已经存在了
         {
             int N = mu_.rows();
             Eigen::MatrixXd F(6, N);
             F.setZero();
-            F.block<3,3>(0, 0) = Eigen::Matrix3d::Identity();
-            F.block<3, 3>(3, 3 + 3 * index) = Eigen::Matrix3d::Identity();
+            F.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity();
+            F.block<3, 3>(3, 3 + 3 * ob.aruco_index_) = Eigen::Matrix3d::Identity();
 
             /* calculate estimation based on estimated state */
-            double &mx = mu_(3 + 3 * index);
-            double &my = mu_(4 + 3 * index);
-            double &mtheta = mu_(5 + 3 * index);
-            double &x = mu_(0);
-            double &y = mu_(1);
-            double &theta = mu_(2);
+            double &mx = mu_(3 + 3 * ob.aruco_index_);
+            double &my = mu_(4 + 3 * ob.aruco_index_);
+            double &mtheta = mu_(5 + 3 * ob.aruco_index_);
+            // double &x = mu_(0);
+            // double &y = mu_(1);
+            // double &theta = mu_(2);
+            // double sintheta = sin(theta);
+            // double costheta = cos(theta);
             double global_delta_x = mx - x;
             double global_delta_y = my - y;
             double global_delta_theta = mtheta - theta;
             normAngle(global_delta_theta);
 
-            double sintheta = sin(theta);
-            double costheta = cos(theta);
             Eigen::Vector3d z_hat(global_delta_x * costheta + global_delta_y * sintheta,
                                   -global_delta_x * sintheta + global_delta_y * costheta,
                                   global_delta_theta);
@@ -119,7 +123,7 @@ void ArucoSlam::addImage(const cv::Mat &img)
                 // ROS_ERROR_STREAM_ONCE("error of z:" << ze.norm() << std::endl);
                 // ROS_INFO_STREAM_ONCE("state:" << mu_ << std::endl);
                 ROS_INFO_STREAM_ONCE("\n\n\n error \n\n\n"
-                                     << index << std::endl);
+                                     << ob.aruco_index_ << std::endl);
                 // continue;
             }
 
@@ -128,25 +132,28 @@ void ArucoSlam::addImage(const cv::Mat &img)
                 sintheta, -costheta, -global_delta_x * costheta - global_delta_y * sintheta, -sintheta, costheta, 0,
                 0, 0, -1, 0, 0, 1;
             Eigen::MatrixXd Gx = Gxm * F;
+            // Eigen::MatrixXd sigmasm(N, N);
+            // sigmasm.block<3,3>(0,0) = sigma_.block<3,3>(0,0);
+            // sigmasm.block<3,3>(0,0) = sigma_.block<3,3>(0,0);
             Eigen::MatrixXd K = sigma_ * Gx.transpose() * (Gx * sigma_ * Gx.transpose() + Rk).inverse();
             // if(K.norm()>1){
-            // // ROS_INFO_STREAM("sigma_:" << sigma_ << std::endl
-            // //                           << "Ht:" << Ht << std::endl
-            // //                           << "Q:" << Q << std::endl
-            // //                           << "i:" << i << std::endl);
+            ROS_INFO_STREAM("sigma_:" << sigma_ << std::endl
+                                      << "F:" << F << std::endl
+                                      << "Gxm:" << Gxm << std::endl
+                                      << "K:" << K << std::endl);
             // }
             // double phi_hat = atan2(delta_y, delta_x) - theta;
             // normAngle(phi_hat);
 
             ROS_INFO_STREAM("z_hat:" << z_hat << std::endl
                                      << "z:" << z << std::endl
-                                     << "i:" << index << std::endl
+                                     << "i:" << ob.aruco_index_ << std::endl
                                      << "mu:" << mu_ << std::endl
                                      << "sigma:" << sigma_ << std::endl);
 
-            mu_ = mu_ + K * (z - z_hat);
+            mu_.topLeftCorner(3, 0) += (K * (z - z_hat)).topLeftCorner(3, 0);
             Eigen::MatrixXd I = Eigen::MatrixXd::Identity(N, N);
-            sigma_ = (I - K * Gx) * sigma_;
+            sigma_.topLeftCorner(3, 3) = ((I - K * Gx) * sigma_).topLeftCorner(3, 3);
             // ROS_INFO_STREAM("mu_corrected:" << mu_ << std::endl);
         }
         else // new markers are added to the map
@@ -179,7 +186,7 @@ void ArucoSlam::addImage(const cv::Mat &img)
             Eigen::Matrix<double, 3, 3> Gmi;
             Gmi << costh, sinth, 0,
                 -sinth, costh, 0,
-                 0, 0,1;
+                0, 0, 1;
 
             /* calculate variance for new marker*/
             Eigen::Matrix3d sigma_mm = Gmi * (Gsk * sigma_s * Gsk.transpose() + Rk).transpose() * Gmi.transpose();
@@ -319,34 +326,6 @@ void ArucoSlam::addMarker(int id, double length, double x, double y, double z,
     // Create transform
     tf2::Quaternion q;
     q.setRPY(roll, pitch, yaw);
-    // tf2::Vector3 tvs(x, y, z);
-    // tf2::Transform transform(q, tvs);
-    // myMap_.insert(std::pair<int, tf2::Vector3>(id, tvs));
-    /* marker's corners:
-        y
-        ^
-    0	|	1
-    ----|------->x
-    3	|	2
-    */
-    // double halflen = length / 2;
-    // tf2::Vector3 p0(-halflen, halflen, 0);
-    // tf2::Vector3 p1(halflen, halflen, 0);
-    // tf2::Vector3 p2(halflen, -halflen, 0);
-    // tf2::Vector3 p3(-halflen, -halflen, 0);
-    // p0 = transform * p0;
-    // p1 = transform * p1;
-    // p2 = transform * p2;
-    // p3 = transform * p3;
-
-    // std::vector<cv::Point3f> obj_points = {
-    //     cv::Point3f(p0.x(), p0.y(), p0.z()),
-    //     cv::Point3f(p1.x(), p1.y(), p1.z()),
-    //     cv::Point3f(p2.x(), p2.y(), p2.z()),
-    //     cv::Point3f(p3.x(), p3.y(), p3.z())};
-
-    // board_->ids.push_back(id);
-    // board_->objPoints.push_back(obj_points);
 
     // Add marker to array
     visualization_msgs::Marker marker;
@@ -458,14 +437,17 @@ int ArucoSlam::getObservations(const cv::Mat &img, std::vector<Observation> &obs
         double x = tvec[2] + transformStamped_r2c_.transform.translation.x;
         double y = -tvec[0] + transformStamped_r2c_.transform.translation.y;
         double theta = atan2(-R.at<double>(0, 2), R.at<double>(2, 2));
-
+        normAngle(theta);
         int aruco_id = IDs[i];
         Eigen::Matrix3d covariance;
         CalculateCovariance(tvec, rvec, marker_corners[i], covariance);
         /* add to observation vector */
         if (covariance.norm() > 1)
             continue;
-        obs.push_back(Observation(aruco_id, x, y, theta, covariance));
+        Observation ob(aruco_id, x, y, theta, covariance);
+        int aruco_index;
+        if(checkLandmark(aruco_id, aruco_index)) ob.aruco_index_ = aruco_index;
+        obs.push_back(ob);
     } // for all detected markers
     return obs.size();
 }
