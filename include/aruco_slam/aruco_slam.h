@@ -55,13 +55,26 @@ public:
     double x_;
     double y_;
     double theta_;
+    Eigen::Vector3d lastobservation_;
 
     friend bool operator<(const Observation &a, const Observation &b)
     {
         return a.aruco_index_ > b.aruco_index_;
     }
+
+    friend bool operator==(const Observation &a, const Observation &b)
+    {
+        return a.aruco_id_ == b.aruco_id_;
+    }
 }; // class Observation
 
+/**
+* @class <ArucoSlam> [header‐file] [<header‐name]
+* @brief brief description
+* @author <list of authors>
+* @note
+* detailed description
+*/
 class ArucoSlam
 {
 public:
@@ -140,7 +153,7 @@ private:
     cv::Mat camera_matrix_, dist_coeffs_;
     int N_;
 
-    std::set<int> last_observed_marker_;
+    std::vector<Observation> last_observed_marker_;
     std::vector<cv::Point3f> objectPoints_ = {cv::Vec3f(-marker_length_ / 2.f, marker_length_ / 2.f, 0), cv::Vec3f(marker_length_ / 2.f, marker_length_ / 2.f, 0), cv::Vec3f(marker_length_ / 2.f, -marker_length_ / 2.f, 0), cv::Vec3f(-marker_length_ / 2.f, -marker_length_ / 2.f, 0)};
     std::priority_queue<Observation> obs_;
 }; // class ArucoSlam

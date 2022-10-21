@@ -87,14 +87,12 @@ void ArucoSlam::addImage(const cv::Mat &img)
     getObservations(img);
     Eigen::MatrixXd mu = mu_;
     ROS_INFO_STREAM("obs_.size:" << obs_.size() << std::endl);
-    std::set<int> observed_marker;
+    std::vector<Observation> observed_marker;
     int index = 0;
     while (!obs_.empty())
     {
         Observation ob = obs_.top();
         obs_.pop();
-        observed_marker.insert(ob.aruco_id_);
-        ++index;
         ROS_INFO_STREAM("\n\n Image data reveived 1 "
                         << "ob.aruco_index_: " << ob.aruco_index_ << "\n\n");
 
@@ -166,72 +164,45 @@ void ArucoSlam::addImage(const cv::Mat &img)
                                 << "z:" << z << std::endl
                                 << "ze:" << ze.norm() << std::endl
                                 << "K:" << K.norm() << std::endl
+                                << "Rk:" << Rk << std::endl
+                                << "Gxm:" << Gxm << std::endl
                                 //  << "i:" << ob.aruco_index_ << std::endl
-                                //  << "mu:" << mu_ << std::endl
-                                //  << "sigma:" << sigma_ << std::endl
-                );
-                // TODO: Remove map point
-                //  continue;
+                                << "mu:" << mu_ << std::endl
+                                << "sigma:" << sigma_ << std::endl);
+                // TODO: Remove map point?
+                // mu_.topLeftCorner(3, 0) += (K * ze).topLeftCorner(3, 0);
+                // continue;
             }
-            ROS_INFO_STREAM(" "
-                            // "z_hat:" << z_hat << std::endl
-                            << "ze:" << ze << std::endl
-                            << "i:" << ob.aruco_index_ << std::endl
-                            << "K:" << K << std::endl
-                            << "Rk:" << Rk << std::endl
-                            << "Gxm:" << Gxm << std::endl
-                            << "mu:" << mu_ << std::endl
-                            << "sigma:" << sigma_ << std::endl);
+            // ROS_INFO_STREAM(" "
+            //                 // "z_hat:" << z_hat << std::endl
+            //                 << "ze:" << ze << std::endl
+            //                 << "i:" << ob.aruco_index_ << std::endl
+            //                 << "K:" << K << std::endl
+            //                 << "Rk:" << Rk << std::endl
+            //                 << "Gxm:" << Gxm << std::endl
+            //                 << "mu:" << mu_ << std::endl
+            //                 << "sigma:" << sigma_ << std::endl);
 
             Eigen::MatrixXd I = Eigen::MatrixXd::Identity(N, N);
 
             bool up_date_map = false;
             double robot_pose_convariance = sigma_.topLeftCorner(3, 3).norm();
             double map_pose_convariance = sigma_.block(3 + 3 * ob.aruco_index_, 3 + 3 * ob.aruco_index_, 3, 3).norm();
-            if (last_observed_marker_.count(ob.aruco_id_) == 0)
-            {
 
-                mu_ += (K * ze);
-                sigma_ = ((I - K * Gx) * sigma_);
-                // if (robot_pose_convariance <= 1e-02)
-                // {
-                // mu_ += (K * ze);
-                // if (map_pose_convariance >= 1e-05)
-                // {
-
-                //     sigma_ = ((I - K * Gx) * sigma_);
-                // }
-                // else
-                // {
-                //     // mu_.topLeftCorner(3, 0) += (K * ze).topLeftCorner(3, 0);
-                //     // sigma_.topLeftCorner(3, N) = ((I - K * Gx) * sigma_).topLeftCorner(3, N);
-                //     // sigma_.topLeftCorner(N, 3) = ((I - K * Gx) * sigma_).topLeftCorner(N, 3);
-
-                //     // mu_.block<3, 1>(3 + 3 * ob.aruco_index_, 0) += (K * ze).block<3, 1>(3 + 3 * ob.aruco_index_, 0);
-                //     // sigma_.block<3, 3>(3 + 3 * ob.aruco_index_, 3 + 3 * ob.aruco_index_) = ((I - K * Gx) * sigma_).block<3, 3>(3 + 3 * ob.aruco_index_, 3 + 3 * ob.aruco_index_);
-                //     // sigma_.block(3 + 3 * ob.aruco_index_, 0,3, N) = ((I - K * Gx) * sigma_).block(3 + 3 * ob.aruco_index_, 0,3, N);
-                //     // sigma_.block(0, 3 + 3 * ob.aruco_index_,N, 3) = ((I - K * Gx) * sigma_).block(0, 3 + 3 * ob.aruco_index_,N, 3);
+            std::vector<Observation>::iterator last_observe_ptr = std::find(last_observed_marker_.begin(), last_observed_marker_.end(), ob);
+            if (last_observe_ptr != last_observed_marker_.end() && (last_observe_ptr->lastobservation_ - z).norm() < 0.1)
+            {   
+                ROS_INFO_STREAM("\n lastobservation_delt:" << (last_observe_ptr->lastobservation_ - z).norm() << std::endl);
+                mu_.topLeftCorner(3, 0) += (K * ze).topLeftCorner(3, 0);
+                // sigma_.topLeftCorner(3, 3) = ((I - K * Gx) * sigma_).topLeftCorner(3, 3);
             }
-            // // }
             else
             {
-                mu_.topLeftCorner(3, 0) += (K * ze).topLeftCorner(3, 0);
-                //     ROS_INFO_STREAM("pose_sigma:" << robot_pose_convariance << std::endl);
-                //     ROS_INFO_STREAM("map_sigma:" << map_pose_convariance << std::endl);
-                //     // mu_.block<3, 1>(3 + 3 * ob.aruco_index_, 0) += (K * ze).block<3, 1>(3 + 3 * ob.aruco_index_, 0);
-                //     mu_.topLeftCorner(3, 0) += (K * ze).topLeftCorner(3, 0);
-                //     sigma_.topLeftCorner(3, 3) = ((I - K * Gx) * sigma_).topLeftCorner(3, 3);
-                //     // sigma_.topLeftCorner(N, 3) = ((I - K * Gx) * sigma_).topLeftCorner(N, 3);
-                //     // if (map_pose_convariance >= 1e-05)
-                //     // {
-                //     //     mu_.block<3, 1>(3 + 3 * ob.aruco_index_, 0) += (K * ze).block<3, 1>(3 + 3 * ob.aruco_index_, 0);
-                //     //     sigma_.block<3, 3>(3 + 3 * ob.aruco_index_, 3 + 3 * ob.aruco_index_) = ((I - K * Gx) * sigma_).block<3, 3>(3 + 3 * ob.aruco_index_, 3 + 3 * ob.aruco_index_);
-                //     //     sigma_.block<3, 3>(3 + 3 * ob.aruco_index_, 0) = ((I - K * Gx) * sigma_).block<3, 3>(3 + 3 * ob.aruco_index_, 0);
-                //     //     sigma_.block<3, 3>(0, 3 + 3 * ob.aruco_index_) = ((I - K * Gx) * sigma_).block<3, 3>(0, 3 + 3 * ob.aruco_index_);
-                //     //     // sigma_.topLeftCorner(N, 3) = ((I - K * Gx) * sigma_).topLeftCorner(N, 3);
-                //     // }
+                // only do correction after the observation changes a distance
+                ob.lastobservation_ = z;
+                mu_ += (K * ze);
+                sigma_ = ((I - K * Gx) * sigma_);
             }
-
             // ROS_INFO_STREAM("mu_corrected:" << mu_ << std::endl);
         }
         else // new markers are added to the map
@@ -287,7 +258,8 @@ void ArucoSlam::addImage(const cv::Mat &img)
             //                          << "obs:id" << ob.aruco_id_ << "obs:x:" << ob.x_ << "obs:y: " << ob.y_ << "obs:theta:" << ob.theta_ << std::endl
             //                          << "obs.covariance:" << ob.covariance_ << std::endl);
         } // add new landmark
-    }     // for all observation
+        observed_marker.push_back(ob);
+    } // for all observation
     last_observed_marker_ = observed_marker;
     /* visualise the new map marker */
     get_detected_map().markers.clear();

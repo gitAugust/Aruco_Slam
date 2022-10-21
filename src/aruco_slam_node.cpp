@@ -61,6 +61,7 @@ int main(int argc, char **argv)
     ros::spin();
 
     delete g_aruco_loca;
+    ros::shutdown();
     return 0;
 }
 
@@ -126,11 +127,14 @@ struct ArucoSlamIniteData getArucoSlamIniteData(const ros::NodeHandle &nh){
     nh.getParam("/aruco_slam_node/odom/kl", inite_data.kl);
     nh.getParam("/aruco_slam_node/odom/kr", inite_data.kr);
     nh.getParam("/aruco_slam_node/odom/b", inite_data.b);
-    nh.getParam("/aruco_slam_node/covariance/k", inite_data.k); // encoder error coefficient
-    nh.getParam("/aruco_slam_node/covariance/k_r", inite_data.k_r);
-    nh.getParam("/aruco_slam_node/covariance/k_phi", inite_data.k_phi);
+    nh.getParam("/aruco_slam_node/covariance/Q_k", inite_data.k); // encoder error coefficient
+    // nh.getParam("/aruco_slam_node/covariance/k_r", inite_data.k_r);
+    // nh.getParam("/aruco_slam_node/covariance/k_phi", inite_data.k_phi);
     nh.getParam("/aruco_slam_node/aruco/markers_dictionary", inite_data.markers_dictionary);
     nh.getParam("/aruco_slam_node/aruco/marker_length", inite_data.marker_length);
-    getTransformStamped("base_link", "camera_frame_optical", inite_data.transformStamped_r2c);
+    std::string robot_frame_base,camera_frame_optical;
+    nh.getParam("/aruco_slam_node/frame/robot_frame_base", robot_frame_base);
+    nh.getParam("/aruco_slam_node/frame/camera_frame_optical", camera_frame_optical);
+    getTransformStamped(robot_frame_base, camera_frame_optical, inite_data.transformStamped_r2c);
     return inite_data;
 }
