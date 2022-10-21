@@ -1,7 +1,7 @@
 covariance:
-    k: 0.05
-    k_r: 0.01
-    k_phi: 0.01
+    k: 0.01 
+    k_r: 0.0005
+    k_phi: 0.001
 
 topic:
     image: /camera/image_raw

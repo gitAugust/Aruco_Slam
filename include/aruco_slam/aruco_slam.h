@@ -15,7 +15,7 @@
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include <tf2_eigen/tf2_eigen.h>
 struct ArucoSlamIniteData
-{   
+{
     /*parameters
     cv::Mat         K
     cv::Mat         dist
@@ -47,28 +47,32 @@ class Observation
 {
 public:
     Observation() {}
-    Observation(const int &aruco_id, const double &x, const double &y, const double &theta,const Eigen::Matrix3d &covariance) 
-    : aruco_id_(aruco_id), aruco_index_(-1), x_(x), y_(y), theta_(theta), covariance_(covariance) {}
+    Observation(const int &aruco_id, const double &x, const double &y, const double &theta, const Eigen::Matrix3d &covariance)
+        : aruco_id_(aruco_id), aruco_index_(-1), x_(x), y_(y), theta_(theta), covariance_(covariance) {}
     Eigen::Matrix3d covariance_;
     int aruco_id_;
     int aruco_index_;
     double x_;
     double y_;
     double theta_;
+
+    friend bool operator<(const Observation &a, const Observation &b)
+    {
+        return a.aruco_index_ > b.aruco_index_;
+    }
 }; // class Observation
 
 class ArucoSlam
 {
 public:
-
     ArucoSlam(const double &kl, const double kr, const double &b,
               const geometry_msgs::TransformStamped &transformStamped_r2c,
               const double &k, const double &k_r, const double k_phi,
               const int &markers_dictionary, const double &marker_length);
     ArucoSlam(const struct ArucoSlamIniteData &inite_data);
-    
-    void addEncoder(const double &el, const double &er); //add encoder data and update
-    void addImage(const cv::Mat &img);                   //add image data and update
+
+    void addEncoder(const double &el, const double &er); // add encoder data and update
+    void addImage(const cv::Mat &img);                   // add image data and update
     void loadMap(std::string filename);
     void fillTransform(tf2::Transform &transform_, const cv::Vec3d &rvec, const cv::Vec3d &tvec);
     void setcameraparameters(const std::pair<cv::Mat, cv::Mat> &cameraparameters)
@@ -87,18 +91,17 @@ public:
     visualization_msgs::MarkerArray &get_detected_map() { return detected_map_; }
     visualization_msgs::MarkerArray get_detected_markers() { return detected_markers_; }
 
-
 private:
-    int getObservations(const cv::Mat &img, std::vector<Observation> &obs);
+    int getObservations(const cv::Mat &img);
     void normAngle(double &angle);
     bool checkLandmark(const int &aruco_id, int &landmark_idx);
     void clearMarkers();
     std::map<int, int> aruco_id_map; // pair<int, int>{aruco_id, position_i}
 
     bool ArrowMarkerGenerate(const int &id, const double &x, const double &y, const double &z, const double &theta, const std_msgs::ColorRGBA &color,
-                                const ros::Duration &lifetime, visualization_msgs::Marker &marker_);
+                             const ros::Duration &lifetime, visualization_msgs::Marker &marker_);
     bool GenerateMarker(int id, double length, double x, double y, double z, tf2::Quaternion q,
-                         visualization_msgs::Marker &marker_, std_msgs::ColorRGBA color, ros::Duration lifetime = ros::Duration(0));
+                        visualization_msgs::Marker &marker_, std_msgs::ColorRGBA color, ros::Duration lifetime = ros::Duration(0));
     void addMarker(int id, double length, double x, double y, double z,
                    double yaw, double pitch, double roll);
     void CalculateCovariance(const cv::Vec3d &tvec, const cv::Vec3d &rvec, const std::vector<cv::Point2f> &marker_corners, Eigen::Matrix3d &covariance);
@@ -124,7 +127,7 @@ private:
     ros::Time last_time_;
 
     /* 求解的扩展状态 均值 和 协方差 */
-    Eigen::VectorXd mu_;         //均值
+    Eigen::VectorXd mu_;         //均值/**< Detailed description after the member */
     Eigen::MatrixXd sigma_;      //方差
     std::vector<int> aruco_ids_; //对应于每个路标的aruco码id
 
@@ -137,8 +140,9 @@ private:
     cv::Mat camera_matrix_, dist_coeffs_;
     int N_;
 
+    std::set<int> last_observed_marker_;
     std::vector<cv::Point3f> objectPoints_ = {cv::Vec3f(-marker_length_ / 2.f, marker_length_ / 2.f, 0), cv::Vec3f(marker_length_ / 2.f, marker_length_ / 2.f, 0), cv::Vec3f(marker_length_ / 2.f, -marker_length_ / 2.f, 0), cv::Vec3f(-marker_length_ / 2.f, -marker_length_ / 2.f, 0)};
-
+    std::priority_queue<Observation> obs_;
 }; // class ArucoSlam
 
 #endif

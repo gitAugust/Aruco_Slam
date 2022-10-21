@@ -49,7 +49,7 @@ int main(int argc, char **argv)
     
     /***** Subscriber Init *****/
     image_transport::CameraSubscriber img_sub_ = it_sub.subscribeCamera(image_topic_name, 1, ImageCallback);
-    ros::Subscriber encoder_sub = nh.subscribe(encoder_topic_name, 1, EncoderCallback);
+    ros::Subscriber encoder_sub = nh.subscribe(encoder_topic_name, 5, EncoderCallback);
     
     /***** ArucoSlam init*****/
     g_aruco_loca = new ArucoSlam(getArucoSlamIniteData(nh));
@@ -66,6 +66,7 @@ int main(int argc, char **argv)
 
 void ImageCallback(const sensor_msgs::ImageConstPtr &img_ptr, const sensor_msgs::CameraInfoConstPtr &cinfo)
 {
+    // ROS_INFO_STREAM("image msg stamp:"<<img_ptr->header.stamp);
     g_aruco_loca->setcameraparameters(parseCameraInfo(cinfo));
     cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(img_ptr, "bgr8");
     
@@ -91,6 +92,7 @@ void EncoderCallback(const std_msgs::Float32MultiArray::ConstPtr &en_ptr)
     g_aruco_loca->addEncoder(enl, enr);
 
     /* publish  robot pose */
+    // ROS_INFO_STREAM("g_aruco_loca->sigma:"<<g_aruco_loca->sigma());
     g_robot_pose_pub.publish(g_aruco_loca->toRosPose());
 }
 

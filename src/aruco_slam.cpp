@@ -15,10 +15,12 @@ ArucoSlam::ArucoSlam(const struct ArucoSlamIniteData &inite_data)
     sigma_.resize(3, 3);
     sigma_.setZero();
     get_detected_map().markers.clear();
+    last_observed_marker_.clear();
 }
 
 void ArucoSlam::addEncoder(const double &wl, const double &wr)
 {
+    // ROS_INFO_STREAM("Encoder data reveived");
     if (is_init_ == false)
     {
         last_time_ = ros::Time::now();
@@ -73,23 +75,42 @@ void ArucoSlam::addEncoder(const double &wl, const double &wr)
 
 void ArucoSlam::addImage(const cv::Mat &img)
 {
+    // ROS_INFO_STREAM("Image data reveived");
+    ROS_INFO_STREAM(" \n\n\n\n\n\n\n  Image data reveived " << std::endl
+                    // "z_hat:" << z_hat << std::endl
+                    // << "mu:" << mu_ << std::endl
+                    // << "sigma:" << sigma_ << std::endl
+    );
     if (is_init_ == false)
         return;
-    std::vector<Observation> obs;
-    getObservations(img, obs);
-    for (Observation ob : obs)
+
+    getObservations(img);
+    Eigen::MatrixXd mu = mu_;
+    ROS_INFO_STREAM("obs_.size:" << obs_.size() << std::endl);
+    std::set<int> observed_marker;
+    int index = 0;
+    while (!obs_.empty())
     {
+        Observation ob = obs_.top();
+        obs_.pop();
+        observed_marker.insert(ob.aruco_id_);
+        ++index;
+        ROS_INFO_STREAM("\n\n Image data reveived 1 "
+                        << "ob.aruco_index_: " << ob.aruco_index_ << "\n\n");
+
         /* 计算观测方差 */
         Eigen::Matrix3d Rk = ob.covariance_;
-        double &x = mu_(0);
-        double &y = mu_(1);
-        double &theta = mu_(2);
-        double sintheta = sin(theta);
-        double costheta = cos(theta);
+        // double &x = mu_(0);
+        // double &y = mu_(1);
+        // double &theta = mu_(2);
+        // double sintheta = sin(theta);
+        // double costheta = cos(theta);
         // Q << k_r_ * k_r_ * fabs(ob.x_ * ob.x_) + 0.1, 0.0, 0.0, k_phi_ * k_phi_ * fabs(ob.y_ * ob.y_) + 0.1;
-        ROS_INFO_STREAM_ONCE("addImage");
-        if (ob.aruco_index_) // 如果路标已经存在了
+        // ROS_INFO_STREAM_ONCE("addImage");
+        if (ob.aruco_index_ >= 0) // 如果路标已经存在了
         {
+            // ROS_INFO_STREAM("\n\n\n\n\n\\n\n  Image data reveived 1 \n\n\n\n\n");
+
             int N = mu_.rows();
             Eigen::MatrixXd F(6, N);
             F.setZero();
@@ -97,14 +118,14 @@ void ArucoSlam::addImage(const cv::Mat &img)
             F.block<3, 3>(3, 3 + 3 * ob.aruco_index_) = Eigen::Matrix3d::Identity();
 
             /* calculate estimation based on estimated state */
-            double &mx = mu_(3 + 3 * ob.aruco_index_);
-            double &my = mu_(4 + 3 * ob.aruco_index_);
-            double &mtheta = mu_(5 + 3 * ob.aruco_index_);
-            // double &x = mu_(0);
-            // double &y = mu_(1);
-            // double &theta = mu_(2);
-            // double sintheta = sin(theta);
-            // double costheta = cos(theta);
+            double &mx = mu(3 + 3 * ob.aruco_index_);
+            double &my = mu(4 + 3 * ob.aruco_index_);
+            double &mtheta = mu(5 + 3 * ob.aruco_index_);
+            double &x = mu(0);
+            double &y = mu(1);
+            double &theta = mu(2);
+            double sintheta = sin(theta);
+            double costheta = cos(theta);
             double global_delta_x = mx - x;
             double global_delta_y = my - y;
             double global_delta_theta = mtheta - theta;
@@ -116,50 +137,107 @@ void ArucoSlam::addImage(const cv::Mat &img)
 
             Eigen::Vector3d z(ob.x_, ob.y_, ob.theta_);
             Eigen::Vector3d ze = z - z_hat;
-
-            if (ze.norm() >= 10)
-            {
-                // ROS_INFO_ONCE("error of z: %lf", ze.norm());
-                // ROS_ERROR_STREAM_ONCE("error of z:" << ze.norm() << std::endl);
-                // ROS_INFO_STREAM_ONCE("state:" << mu_ << std::endl);
-                ROS_INFO_STREAM_ONCE("\n\n\n error \n\n\n"
-                                     << ob.aruco_index_ << std::endl);
-                // continue;
-            }
+            normAngle(ze[2]);
 
             Eigen::MatrixXd Gxm(3, 6);
             Gxm << -costheta, -sintheta, -global_delta_x * sintheta + global_delta_y * costheta, costheta, sintheta, 0,
                 sintheta, -costheta, -global_delta_x * costheta - global_delta_y * sintheta, -sintheta, costheta, 0,
                 0, 0, -1, 0, 0, 1;
             Eigen::MatrixXd Gx = Gxm * F;
-            // Eigen::MatrixXd sigmasm(N, N);
-            // sigmasm.block<3,3>(0,0) = sigma_.block<3,3>(0,0);
-            // sigmasm.block<3,3>(0,0) = sigma_.block<3,3>(0,0);
+
             Eigen::MatrixXd K = sigma_ * Gx.transpose() * (Gx * sigma_ * Gx.transpose() + Rk).inverse();
+
             // if(K.norm()>1){
-            ROS_INFO_STREAM("sigma_:" << sigma_ << std::endl
-                                      << "F:" << F << std::endl
-                                      << "Gxm:" << Gxm << std::endl
-                                      << "K:" << K << std::endl);
+            // ROS_INFO_STREAM("sigma_:" << sigma_ << std::endl
+            //                           << "F:" << F << std::endl
+            //                           << "Gxm:" << Gxm << std::endl
+            //                           << "K:" << K << std::endl);
             // }
             // double phi_hat = atan2(delta_y, delta_x) - theta;
             // normAngle(phi_hat);
+            if (ze.norm() >= 1 || K.norm() >= 10)
+            {
+                // ROS_INFO_ONCE("error of z: %lf", ze.norm());
+                // ROS_ERROR_STREAM_ONCE("error of z:" << ze.norm() << std::endl);
+                // ROS_INFO_STREAM_ONCE("state:" << mu_ << std::endl);
+                ROS_INFO_STREAM("\n\n\n error \n\n\n"
+                                //  << "ob.aruco_index_:"<<ob.aruco_index_ << std::endl
+                                << "z_hat:" << z_hat << std::endl
+                                << "z:" << z << std::endl
+                                << "ze:" << ze.norm() << std::endl
+                                << "K:" << K.norm() << std::endl
+                                //  << "i:" << ob.aruco_index_ << std::endl
+                                //  << "mu:" << mu_ << std::endl
+                                //  << "sigma:" << sigma_ << std::endl
+                );
+                // TODO: Remove map point
+                //  continue;
+            }
+            ROS_INFO_STREAM(" "
+                            // "z_hat:" << z_hat << std::endl
+                            << "ze:" << ze << std::endl
+                            << "i:" << ob.aruco_index_ << std::endl
+                            << "K:" << K << std::endl
+                            << "Rk:" << Rk << std::endl
+                            << "Gxm:" << Gxm << std::endl
+                            << "mu:" << mu_ << std::endl
+                            << "sigma:" << sigma_ << std::endl);
 
-            ROS_INFO_STREAM("z_hat:" << z_hat << std::endl
-                                     << "z:" << z << std::endl
-                                     << "i:" << ob.aruco_index_ << std::endl
-                                     << "mu:" << mu_ << std::endl
-                                     << "sigma:" << sigma_ << std::endl);
-
-            mu_.topLeftCorner(3, 0) += (K * (z - z_hat)).topLeftCorner(3, 0);
             Eigen::MatrixXd I = Eigen::MatrixXd::Identity(N, N);
-            sigma_.topLeftCorner(3, 3) = ((I - K * Gx) * sigma_).topLeftCorner(3, 3);
+
+            bool up_date_map = false;
+            double robot_pose_convariance = sigma_.topLeftCorner(3, 3).norm();
+            double map_pose_convariance = sigma_.block(3 + 3 * ob.aruco_index_, 3 + 3 * ob.aruco_index_, 3, 3).norm();
+            if (last_observed_marker_.count(ob.aruco_id_) == 0)
+            {
+
+                mu_ += (K * ze);
+                sigma_ = ((I - K * Gx) * sigma_);
+                // if (robot_pose_convariance <= 1e-02)
+                // {
+                // mu_ += (K * ze);
+                // if (map_pose_convariance >= 1e-05)
+                // {
+
+                //     sigma_ = ((I - K * Gx) * sigma_);
+                // }
+                // else
+                // {
+                //     // mu_.topLeftCorner(3, 0) += (K * ze).topLeftCorner(3, 0);
+                //     // sigma_.topLeftCorner(3, N) = ((I - K * Gx) * sigma_).topLeftCorner(3, N);
+                //     // sigma_.topLeftCorner(N, 3) = ((I - K * Gx) * sigma_).topLeftCorner(N, 3);
+
+                //     // mu_.block<3, 1>(3 + 3 * ob.aruco_index_, 0) += (K * ze).block<3, 1>(3 + 3 * ob.aruco_index_, 0);
+                //     // sigma_.block<3, 3>(3 + 3 * ob.aruco_index_, 3 + 3 * ob.aruco_index_) = ((I - K * Gx) * sigma_).block<3, 3>(3 + 3 * ob.aruco_index_, 3 + 3 * ob.aruco_index_);
+                //     // sigma_.block(3 + 3 * ob.aruco_index_, 0,3, N) = ((I - K * Gx) * sigma_).block(3 + 3 * ob.aruco_index_, 0,3, N);
+                //     // sigma_.block(0, 3 + 3 * ob.aruco_index_,N, 3) = ((I - K * Gx) * sigma_).block(0, 3 + 3 * ob.aruco_index_,N, 3);
+            }
+            // // }
+            else
+            {
+                mu_.topLeftCorner(3, 0) += (K * ze).topLeftCorner(3, 0);
+                //     ROS_INFO_STREAM("pose_sigma:" << robot_pose_convariance << std::endl);
+                //     ROS_INFO_STREAM("map_sigma:" << map_pose_convariance << std::endl);
+                //     // mu_.block<3, 1>(3 + 3 * ob.aruco_index_, 0) += (K * ze).block<3, 1>(3 + 3 * ob.aruco_index_, 0);
+                //     mu_.topLeftCorner(3, 0) += (K * ze).topLeftCorner(3, 0);
+                //     sigma_.topLeftCorner(3, 3) = ((I - K * Gx) * sigma_).topLeftCorner(3, 3);
+                //     // sigma_.topLeftCorner(N, 3) = ((I - K * Gx) * sigma_).topLeftCorner(N, 3);
+                //     // if (map_pose_convariance >= 1e-05)
+                //     // {
+                //     //     mu_.block<3, 1>(3 + 3 * ob.aruco_index_, 0) += (K * ze).block<3, 1>(3 + 3 * ob.aruco_index_, 0);
+                //     //     sigma_.block<3, 3>(3 + 3 * ob.aruco_index_, 3 + 3 * ob.aruco_index_) = ((I - K * Gx) * sigma_).block<3, 3>(3 + 3 * ob.aruco_index_, 3 + 3 * ob.aruco_index_);
+                //     //     sigma_.block<3, 3>(3 + 3 * ob.aruco_index_, 0) = ((I - K * Gx) * sigma_).block<3, 3>(3 + 3 * ob.aruco_index_, 0);
+                //     //     sigma_.block<3, 3>(0, 3 + 3 * ob.aruco_index_) = ((I - K * Gx) * sigma_).block<3, 3>(0, 3 + 3 * ob.aruco_index_);
+                //     //     // sigma_.topLeftCorner(N, 3) = ((I - K * Gx) * sigma_).topLeftCorner(N, 3);
+                //     // }
+            }
+
             // ROS_INFO_STREAM("mu_corrected:" << mu_ << std::endl);
         }
         else // new markers are added to the map
         {
-            float sinth = sin(mu_(2));
-            float costh = cos(mu_(2));
+            float sinth = sin(mu(2));
+            float costh = cos(mu(2));
 
             /**** add to the map ****/
             /* updata the mean value */
@@ -167,17 +245,17 @@ void ArucoSlam::addImage(const cv::Mat &img)
             Eigen::VectorXd tmp_mu(N + 3);
             tmp_mu.setZero();
 
-            double map_x = mu_(0) + costh * ob.x_ - sinth * ob.y_;
-            double map_y = mu_(1) + sinth * ob.x_ + costh * ob.y_;
-            double map_theta = mu_(2) + ob.theta_;
+            double map_x = mu(0) + costh * ob.x_ - sinth * ob.y_;
+            double map_y = mu(1) + sinth * ob.x_ + costh * ob.y_;
+            double map_theta = mu(2) + ob.theta_;
             normAngle(map_theta);
             tmp_mu << mu_, map_x, map_y, map_theta;
             mu_.resize(N + 3);
             mu_ = tmp_mu;
 
             /* update the covariance of the map */
-            double deltax = map_x - mu_(0);
-            double deltay = map_y - mu_(1);
+            double deltax = map_x - mu(0);
+            double deltay = map_y - mu(1);
             Eigen::Matrix3d sigma_s = sigma_.block(0, 0, 3, 3);
             Eigen::Matrix<double, 3, 3> Gsk;
             Gsk << -costh, -sinth, -sinth * deltax + costh * deltay,
@@ -205,12 +283,12 @@ void ArucoSlam::addImage(const cv::Mat &img)
 
             /***** add new marker's id to the dictionary *****/
             aruco_id_map.insert(std::pair<int, int>{ob.aruco_id_, (mu_.rows() - 3) / 3 - 1});
-            ROS_INFO_STREAM("state:" << mu_ << std::endl
-                                     << "obs:id" << ob.aruco_id_ << "obs:x:" << ob.x_ << "obs:y: " << ob.y_ << "obs:theta:" << ob.theta_ << std::endl
-                                     << "obs.covariance:" << ob.covariance_ << std::endl);
+            // ROS_INFO_STREAM("state:" << mu_ << std::endl
+            //                          << "obs:id" << ob.aruco_id_ << "obs:x:" << ob.x_ << "obs:y: " << ob.y_ << "obs:theta:" << ob.theta_ << std::endl
+            //                          << "obs.covariance:" << ob.covariance_ << std::endl);
         } // add new landmark
     }     // for all observation
-
+    last_observed_marker_ = observed_marker;
     /* visualise the new map marker */
     get_detected_map().markers.clear();
     for (int i = 0; i < (mu_.rows() - 3) / 3; i++)
@@ -229,6 +307,11 @@ void ArucoSlam::addImage(const cv::Mat &img)
         GenerateMarker(i, marker_length_, map_x, map_y, 0.3, q, marker, color);
         get_detected_map().markers.push_back(marker);
     }
+    // ROS_INFO_STREAM("Image data precess finished");
+    ROS_INFO_STREAM("Image data precess finished "
+                    // "z_hat:" << z_hat << std::endl
+                    << "mu:" << mu_ << std::endl
+                    << "sigma:" << sigma_ << std::endl);
 }
 
 void ArucoSlam::loadMap(std::string filename)
@@ -383,7 +466,7 @@ bool ArucoSlam::ArrowMarkerGenerate(const int &id, const double &x, const double
     return true;
 }
 
-int ArucoSlam::getObservations(const cv::Mat &img, std::vector<Observation> &obs)
+int ArucoSlam::getObservations(const cv::Mat &img)
 {
     std::vector<std::vector<cv::Point2f>> marker_corners;
     std::vector<int> IDs;
@@ -403,8 +486,8 @@ int ArucoSlam::getObservations(const cv::Mat &img, std::vector<Observation> &obs
 
     for (size_t i = 0; i < IDs.size(); i++)
     {
-        // float dist = cv::norm<double>(tvs[i]);
-        float dist = tvs[i][2];
+        float dist = cv::norm<double>(tvs[i]);
+        // float dist = tvs[i][2];
         if (dist > USEFUL_DISTANCE_THRESHOLD)
         {
             continue;
@@ -446,10 +529,11 @@ int ArucoSlam::getObservations(const cv::Mat &img, std::vector<Observation> &obs
             continue;
         Observation ob(aruco_id, x, y, theta, covariance);
         int aruco_index;
-        if(checkLandmark(aruco_id, aruco_index)) ob.aruco_index_ = aruco_index;
-        obs.push_back(ob);
+        checkLandmark(aruco_id, aruco_index);
+        ob.aruco_index_ = aruco_index;
+        obs_.push(ob);
     } // for all detected markers
-    return obs.size();
+    return obs_.size();
 }
 
 visualization_msgs::MarkerArray ArucoSlam::toRosMarkers(double scale)
@@ -506,12 +590,20 @@ geometry_msgs::PoseWithCovarianceStamped ArucoSlam::toRosPose()
     rpose.header.frame_id = "world";
     rpose.pose.pose.position.x = mu_(0);
     rpose.pose.pose.position.y = mu_(1);
+    rpose.pose.pose.position.z = 0.1;
 
     // rpose.pose.pose.orientation = tf2::createQuaternionMsgFromYaw(mu_(2));
     tf2::Quaternion QuaternionMsgFromYaw;
     QuaternionMsgFromYaw.setRPY(0, 0, mu_(2));
     rpose.pose.pose.orientation = tf2::toMsg(QuaternionMsgFromYaw);
-
+    /*rpose.pose.covariance
+    xx  xy  0   0   0   xy  0-5
+    yx  yy  0   0   0   yy  6-11
+    0   0   0   0   0   0   12-17
+    0   0   0   0   0   0   18-23
+    0   0   0   0   0   0   24-29
+    yy  yy  0   0   0   yy  30-35
+    */
     rpose.pose.covariance.at(0) = sigma_(0, 0);
     rpose.pose.covariance.at(1) = sigma_(0, 1);
     rpose.pose.covariance.at(5) = sigma_(0, 2);
@@ -542,9 +634,11 @@ bool ArucoSlam::checkLandmark(const int &aruco_id, int &landmark_idx)
     if (!aruco_id_map.empty() && aruco_id_map.end() != aruco_id_map.find(aruco_id))
     {
         landmark_idx = aruco_id_map.at(aruco_id);
-        ROS_INFO_STREAM("aruco_id:" << aruco_id << "index:" << landmark_idx);
+        // ROS_INFO_STREAM("aruco_id:" << aruco_id << "index:" << landmark_idx);
         return true;
     }
+    else
+        landmark_idx = -1;
     return false;
 }
 
@@ -578,7 +672,8 @@ void ArucoSlam::CalculateCovariance(const cv::Vec3d &tvec, const cv::Vec3d &rvec
     }
     double rerror = totalError / (double)objectPoints_.size();
     rerror = rerror;
-    covariance << rerror / 50, 0, 0, 0, rerror / 100, 0, 0, 0, rerror / 500;
+    // covariance << rerror / 100, 0, 0, 0, rerror / 300, 0, 0, 0, rerror / 100;
+    covariance << rerror / 500 + 1e-3, 0, 0, 0, rerror / 500 + 1e-3, 0, 0, 0, rerror / 1000 + 1e-3;
 }
 
 void ArucoSlam::fillTransform(tf2::Transform &transform_, const cv::Vec3d &rvec, const cv::Vec3d &tvec)
