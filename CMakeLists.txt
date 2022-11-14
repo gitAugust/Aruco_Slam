@@ -113,7 +113,8 @@ find_package(Eigen3  REQUIRED)
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
  INCLUDE_DIRS include DEPENDS
- LIBRARIES aruco_localisation
+ LIBRARIES aruco_slam
+ LIBRARIES map_loader
   # CATKIN_DEPENDS message_runtime
 #  DEPENDS system_lib
 )
@@ -136,6 +137,7 @@ include_directories(
 # Declare a C++ library
 add_library(${PROJECT_NAME} SHARED
   src/aruco_slam.cpp
+  src/map_loader.cpp
   # src/aruco_localisation_node.cpp
 )
 

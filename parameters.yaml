@@ -3,14 +3,14 @@
 
 covariance:
     Q_k: 0.01           ## Error coefficient of encoder
-    R_x: 0.0005         ## Error coefficient of observation x
-    R_y: 0.001          ## Error coefficient of observation y
-    R_theta: 0.001      ## Error coefficient of observation theta
+    R_x: 100         ## Error coefficient of observation x
+    R_y: 100          ## Error coefficient of observation y
+    R_theta: 10      ## Error coefficient of observation theta
 
 odom:
     kl: 0.05    ## Left wheel radius
-    kr: 0.05    ## Left wheel radius
-    b: 0.09     ## half of robot wheelbase
+    kr: 0.05    ## Right wheel radius
+    b: 0.09     ## Half of robot wheelbase
 
 aruco:
     markers_dictionary: 16 ## cv::aruco::PREDEFINED_DICTIONARY_NAME
@@ -25,8 +25,10 @@ topic:
     image: /camera/image_raw    ## Subscribed topic for image msg including image sensor_msgs::ImageConstPtr and camera info sensor_msgs::CameraInfoConstPtr
     encoder: /encoder           ## Subscribed topic for encoder msg including vector with two wheels' anguler valocity std_msgs::Float32MultiArray::ConstPtr
 
-map:
-    map_file: "/home/liangyichen/catkin_ws/src/aruco_slam/map/map.txt" #Direction of map file with accurate information of real map
+# map: 
+#     map_file: "/home/liangyichen/catkin_ws/src/aruco_slam/map/map.txt" #Direction of map file with accurate information of real map
+const:
+    USEFUL_DISTANCE_THRESHOLD: 4
 
 
 

@@ -1,20 +1,20 @@
 #include "aruco_slam/aruco_slam.h"
 
 ArucoSlam::ArucoSlam(const struct ArucoSlamIniteData &inite_data)
-    : kl_(inite_data.kl), kr_(inite_data.kr), b_(inite_data.b), transformStamped_r2c_(inite_data.transformStamped_r2c), k_(inite_data.k),
-      k_r_(inite_data.k_r), k_phi_(inite_data.k_phi), markers_dictionary_(inite_data.markers_dictionary), marker_length_(inite_data.marker_length)
+    : kl_(inite_data.kl), kr_(inite_data.kr), b_(inite_data.b), transformStamped_r2c_(inite_data.transformStamped_r2c), Q_k_(inite_data.Q_k),
+      R_x_(inite_data.R_x), R_y_(inite_data.R_y), R_theta_(inite_data.R_theta), markers_dictionary_(inite_data.markers_dictionary),
+      marker_length_(inite_data.marker_length), USEFUL_DISTANCE_THRESHOLD_(inite_data.USEFUL_DISTANCE_THRESHOLD)
 {
     is_init_ = false;
     K_ = cv::Mat(3, 3, 6);
     dist_ = cv::Mat(5, 1, 6);
     dictionary_ = cv::aruco::getPredefinedDictionary(
         static_cast<cv::aruco::PREDEFINED_DICTIONARY_NAME>(markers_dictionary_));
-    /* State and Covariance */
     mu_.resize(3);
     mu_.setZero();
     sigma_.resize(3, 3);
     sigma_.setZero();
-    get_detected_map().markers.clear();
+    detected_map_.markers.clear();
     last_observed_marker_.clear();
 }
 
@@ -68,7 +68,7 @@ void ArucoSlam::addEncoder(const double &wl, const double &wr)
     Eigen::MatrixXd Hx = Eigen::MatrixXd::Identity(N, N);
     Hx.block(0, 0, 3, 3) = H_xi;
     Eigen::Matrix2d sigma_u;
-    sigma_u << k_ * fabs(wl), 0.0, 0.0, k_ * fabs(wr);
+    sigma_u << Q_k_ * fabs(wl), 0.0, 0.0, Q_k_ * fabs(wr);
     Eigen::MatrixXd Qk = wkh * sigma_u * wkh.transpose();
     sigma_ = Hx * sigma_ * Hx.transpose() + F * Qk * F.transpose();
 }
@@ -87,17 +87,17 @@ void ArucoSlam::addImage(const cv::Mat &img)
     getObservations(img);
     Eigen::MatrixXd mu = mu_;
     ROS_INFO_STREAM("obs_.size:" << obs_.size() << std::endl);
-    std::vector<Observation> observed_marker;
+    std::vector<ArucoMarker> observed_marker;
     int index = 0;
     while (!obs_.empty())
     {
-        Observation ob = obs_.top();
+        ArucoMarker ob = obs_.top();
         obs_.pop();
         ROS_INFO_STREAM("\n\n Image data reveived 1 "
                         << "ob.aruco_index_: " << ob.aruco_index_ << "\n\n");
 
         /* 计算观测方差 */
-        Eigen::Matrix3d Rk = ob.covariance_;
+        Eigen::Matrix3d Rk = ob.observe_covariance_;
         // double &x = mu_(0);
         // double &y = mu_(1);
         // double &theta = mu_(2);
@@ -189,17 +189,17 @@ void ArucoSlam::addImage(const cv::Mat &img)
             double robot_pose_convariance = sigma_.topLeftCorner(3, 3).norm();
             double map_pose_convariance = sigma_.block(3 + 3 * ob.aruco_index_, 3 + 3 * ob.aruco_index_, 3, 3).norm();
 
-            std::vector<Observation>::iterator last_observe_ptr = std::find(last_observed_marker_.begin(), last_observed_marker_.end(), ob);
-            if (last_observe_ptr != last_observed_marker_.end() && (last_observe_ptr->lastobservation_ - z).norm() < 0.1)
-            {   
-                ROS_INFO_STREAM("\n lastobservation_delt:" << (last_observe_ptr->lastobservation_ - z).norm() << std::endl);
+            std::vector<ArucoMarker>::iterator last_observe_ptr = std::find(last_observed_marker_.begin(), last_observed_marker_.end(), ob);
+            if (last_observe_ptr != last_observed_marker_.end() && (last_observe_ptr->last_observation_ - z).norm() < 0.01)
+            {
+                ROS_INFO_STREAM("\n lastobservation_delt:" << (last_observe_ptr->last_observation_ - z).norm() << std::endl);
                 mu_.topLeftCorner(3, 0) += (K * ze).topLeftCorner(3, 0);
                 // sigma_.topLeftCorner(3, 3) = ((I - K * Gx) * sigma_).topLeftCorner(3, 3);
             }
             else
             {
-                // only do correction after the observation changes a distance
-                ob.lastobservation_ = z;
+                // only do correction after the ArucoMarker changes a distance
+                ob.last_observation_ = z;
                 mu_ += (K * ze);
                 sigma_ = ((I - K * Gx) * sigma_);
             }
@@ -262,7 +262,7 @@ void ArucoSlam::addImage(const cv::Mat &img)
     } // for all observation
     last_observed_marker_ = observed_marker;
     /* visualise the new map marker */
-    get_detected_map().markers.clear();
+    detected_map_.markers.clear();
     for (int i = 0; i < (mu_.rows() - 3) / 3; i++)
     {
         double map_x = mu_(i * 3 + 3, 0);
@@ -277,120 +277,13 @@ void ArucoSlam::addImage(const cv::Mat &img)
         color.g = 0.5;
         color.r = 1;
         GenerateMarker(i, marker_length_, map_x, map_y, 0.3, q, marker, color);
-        get_detected_map().markers.push_back(marker);
+        detected_map_.markers.push_back(marker);
     }
     // ROS_INFO_STREAM("Image data precess finished");
     ROS_INFO_STREAM("Image data precess finished "
                     // "z_hat:" << z_hat << std::endl
                     << "mu:" << mu_ << std::endl
                     << "sigma:" << sigma_ << std::endl);
-}
-
-void ArucoSlam::loadMap(std::string filename)
-{
-    ROS_INFO("\n loading from: %s", filename.c_str());
-    std::ifstream f(filename);
-    std::string line;
-    clearMarkers();
-    if (!f.good())
-    {
-        ROS_ERROR("%s - %s", strerror(errno), filename.c_str());
-        return;
-    }
-    N_ = 3;
-    while (std::getline(f, line))
-    {
-        int id;
-        double length, x, y, z, yaw, pitch, roll;
-
-        std::istringstream s(line);
-        // Read first character to see whether it's a comment
-        char first = 0;
-        if (!(s >> first))
-        {
-            // No non-whitespace characters, must be a blank line
-            continue;
-        }
-
-        if (first == '#')
-        {
-            ROS_DEBUG("Skipping line as a comment: %s", line.c_str());
-            continue;
-        }
-        else if (isdigit(first))
-        {
-            // Put the digit back into the stream
-            // Note that this is a non-modifying putback, so this should work with istreams
-            // (see https://en.cppreference.com/w/cpp/io/basic_istream/putback)
-            s.putback(first);
-        }
-        else
-        {
-            // Probably garbage data; inform user and throw an exception, possibly killing nodelet
-            ROS_ERROR("Malformed input: %s", line.c_str());
-            clearMarkers();
-            return;
-        }
-
-        if (!(s >> id >> length >> x >> y))
-        {
-            ROS_ERROR("Not enough data in line: %s; "
-                      "Each marker must have at least id, length, x, y fields",
-                      line.c_str());
-            continue;
-        }
-        // Be less strict about z, yaw, pitch roll
-        if (!(s >> z))
-        {
-            ROS_DEBUG("No z coordinate provided for marker %d, assuming 0", id);
-            z = 0;
-        }
-        if (!(s >> roll))
-        {
-            ROS_DEBUG("No yaw provided for marker %d, assuming 0", id);
-            yaw = 0;
-        }
-        if (!(s >> pitch))
-        {
-            ROS_DEBUG("No pitch provided for marker %d, assuming 0", id);
-            pitch = 0;
-        }
-        if (!(s >> yaw))
-        {
-            ROS_DEBUG("No roll provided for marker %d, assuming 0", id);
-            roll = 0;
-        }
-        // ROS_INFO("id, length, x, y, z, yaw, pitch, roll:%d, %lf, %lf %lf %lf %lf %lf %lf ",
-        // id, length, x, y, z, yaw, pitch, roll);
-        addMarker(id, length, x, y, z, yaw, pitch, roll);
-        N_ += 1;
-    }
-
-    // ROS_INFO("loading %s complete (%d markers)", filename.c_str(), static_cast<int>(myMap_.size()));
-}
-
-void ArucoSlam::clearMarkers()
-{
-    // myMap_.clear();
-    real_map_.markers.clear();
-}
-
-void ArucoSlam::addMarker(int id, double length, double x, double y, double z,
-                          double yaw, double pitch, double roll)
-{
-    // Create transform
-    tf2::Quaternion q;
-    q.setRPY(roll, pitch, yaw);
-
-    // Add marker to array
-    visualization_msgs::Marker marker;
-    std_msgs::ColorRGBA color;
-    color.a = 1;
-    color.b = 1;
-    color.g = 1;
-    color.r = 1;
-    GenerateMarker(id, length, x, y, z, q, marker, color);
-    real_map_.markers.push_back(marker);
 }
 
 bool ArucoSlam::GenerateMarker(int id, double length, double x, double y, double z, tf2::Quaternion q, visualization_msgs::Marker &marker_, std_msgs::ColorRGBA color, ros::Duration lifetime)
@@ -411,33 +304,6 @@ bool ArucoSlam::GenerateMarker(int id, double length, double x, double y, double
     return true;
 }
 
-bool ArucoSlam::ArrowMarkerGenerate(const int &id, const double &x, const double &y, const double &z, const double &theta, const std_msgs::ColorRGBA &color, const ros::Duration &lifetime, visualization_msgs::Marker &marker_)
-{
-    marker_.id = id;
-    marker_.header.frame_id = "world";
-    marker_.type = visualization_msgs::Marker::ARROW;
-    marker_.scale.x = 0.1;
-    marker_.scale.y = 0.1;
-    marker_.scale.z = 0.2;
-
-    marker_.color = color;
-    marker_.pose.position.x = x;
-    marker_.pose.position.y = y;
-    marker_.pose.position.z = z;
-
-    tf2::Quaternion QuaternionMsgFromYaw;
-    QuaternionMsgFromYaw.setRPY(0, 0, theta);
-    marker_.pose.orientation = tf2::toMsg(QuaternionMsgFromYaw);
-    marker_.pose.orientation.w = 1;
-    marker_.pose.orientation.x = 0;
-    marker_.pose.orientation.y = 0;
-    marker_.pose.orientation.z = 0;
-
-    marker_.action = visualization_msgs::Marker::ADD;
-    marker_.lifetime = lifetime;
-    return true;
-}
-
 int ArucoSlam::getObservations(const cv::Mat &img)
 {
     std::vector<std::vector<cv::Point2f>> marker_corners;
@@ -449,20 +315,21 @@ int ArucoSlam::getObservations(const cv::Mat &img)
     // The returned transformation is the one that transforms points from the board coordinate system to the camera coordinate system.
 
     /* draw all marks */
-    marker_img_ = img.clone();
-    cv::aruco::drawDetectedMarkers(marker_img_, marker_corners, IDs);
+    markered_img_ = img.clone();
+    cv::aruco::drawDetectedMarkers(markered_img_, marker_corners, IDs);
     // for (size_t i = 0; i < IDs.size(); i++)
     //     cv::aruco::drawAxis(marker_img_, K_, dist_, rvs[i], tvs[i], 0.07);
 
-    const float USEFUL_DISTANCE_THRESHOLD = 2.5; // 3 m
+    // const float USEFUL_DISTANCE_THRESHOLD = 2.5; // 3 m
 
     for (size_t i = 0; i < IDs.size(); i++)
     {
         float dist = cv::norm<double>(tvs[i]);
         // float dist = tvs[i][2];
-        if (dist > USEFUL_DISTANCE_THRESHOLD)
+        if (dist > USEFUL_DISTANCE_THRESHOLD_)
         {
             continue;
+            ROS_ERROR_STREAM("USEFUL_DISTANCE_THRESHOLD_:"<<USEFUL_DISTANCE_THRESHOLD_);
         }
 
         /*visualise used marks */
@@ -499,60 +366,13 @@ int ArucoSlam::getObservations(const cv::Mat &img)
         /* add to observation vector */
         if (covariance.norm() > 1)
             continue;
-        Observation ob(aruco_id, x, y, theta, covariance);
+        ArucoMarker ob(aruco_id, x, y, theta, covariance);
         int aruco_index;
         checkLandmark(aruco_id, aruco_index);
         ob.aruco_index_ = aruco_index;
         obs_.push(ob);
     } // for all detected markers
     return obs_.size();
-}
-
-visualization_msgs::MarkerArray ArucoSlam::toRosMarkers(double scale)
-{
-
-    visualization_msgs::MarkerArray markers;
-    int N = 0;
-    for (int i = 4; i < mu_.rows(); i += 2)
-    {
-        double &mx = mu_(i - 1);
-        double &my = mu_(i);
-
-        /* 计算地图点的协方差椭圆角度以及轴长 */
-        Eigen::Matrix3d sigma_m = sigma_.block(i - 1, i - 1, 2, 2); //协方差
-        cv::Mat cvsigma_m = (cv::Mat_<double>(2, 2) << sigma_m(0, 0), sigma_m(0, 1), sigma_m(1, 0), sigma_m(1, 1));
-        cv::Mat eigen_value, eigen_vector;
-        cv::eigen(cvsigma_m, eigen_value, eigen_vector);
-        double angle = atan2(eigen_vector.at<double>(0, 1), eigen_vector.at<double>(0, 0));
-        double x_len = 2 * sqrt(eigen_value.at<double>(0, 0) * 5.991);
-        double y_len = 2 * sqrt(eigen_value.at<double>(1, 0) * 5.991);
-
-        /* 构造marker */
-        visualization_msgs::Marker marker;
-        marker.header.frame_id = "world";
-        marker.header.stamp = ros::Time();
-        marker.ns = "ekf_slam";
-        marker.id = i;
-        marker.type = visualization_msgs::Marker::SPHERE;
-        marker.action = visualization_msgs::Marker::ADD;
-        marker.pose.position.x = mx;
-        marker.pose.position.y = my;
-        marker.pose.position.z = 0;
-        tf2::Quaternion _q;
-        _q.setRPY(0, 0, angle);
-        marker.pose.orientation = tf2::toMsg(_q);
-        marker.scale.x = scale * x_len;
-        marker.scale.y = scale * y_len;
-        marker.scale.z = 0.1 * scale * (x_len + y_len);
-        marker.color.a = 0.8; // Don't forget to set the alpha!
-        marker.color.r = 0.0;
-        marker.color.g = 1.0;
-        marker.color.b = 0.0;
-
-        markers.markers.push_back(marker);
-    } // for all mpts
-
-    return markers;
 }
 
 geometry_msgs::PoseWithCovarianceStamped ArucoSlam::toRosPose()
@@ -642,10 +462,12 @@ void ArucoSlam::CalculateCovariance(const cv::Vec3d &tvec, const cv::Vec3d &rvec
         double error = dist(marker_corners[i], projectedPoints[i]);
         totalError += error * error;
     }
-    double rerror = totalError / (double)objectPoints_.size();
-    rerror = rerror;
+    double rmserror = totalError / (double)objectPoints_.size();
+    double object_error = (rmserror / dist(marker_corners[0], marker_corners[2])) *
+                          (norm(tvec) / marker_length_);
     // covariance << rerror / 100, 0, 0, 0, rerror / 300, 0, 0, 0, rerror / 100;
-    covariance << rerror / 500 + 1e-3, 0, 0, 0, rerror / 500 + 1e-3, 0, 0, 0, rerror / 1000 + 1e-3;
+    // ROS_INFO_STREAM("object_error:"<<object_error);
+    covariance << object_error * R_x_ + 1e-2, 0, 0, 0, object_error * R_y_ + 1e-2, 0, 0, 0, object_error * R_theta_ + 1e-3;
 }
 
 void ArucoSlam::fillTransform(tf2::Transform &transform_, const cv::Vec3d &rvec, const cv::Vec3d &tvec)
