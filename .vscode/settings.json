@@ -70,6 +70,20 @@
         "dense": "cpp",
         "*.ipp": "cpp",
         "forward_list": "cpp",
-        "core": "cpp"
-    }
+        "core": "cpp",
+        "csetjmp": "cpp",
+        "condition_variable": "cpp",
+        "future": "cpp",
+        "mutex": "cpp",
+        "scoped_allocator": "cpp",
+        "regex": "cpp",
+        "valarray": "cpp",
+        "codecvt": "cpp",
+        "cuchar": "cpp",
+        "shared_mutex": "cpp"
+    },
+    "python.analysis.extraPaths": [
+        "/home/liangyichen/catkin_ws/devel/lib/python2.7/dist-packages",
+        "/opt/ros/melodic/lib/python2.7/dist-packages"
+    ],
 }

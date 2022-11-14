@@ -1,44 +1,34 @@
+## @package parameters
+#  Parameters used in the aruco_slam.
+
 covariance:
-    k: 0.05
-    k_r: 0.01
-    k_phi: 0.01
-
-topic:
-    image: /camera/image_raw
-    encoder: /encoder
-
-camera:
-    fx: 525.2866213437447
-    fy: 525.2178123117577
-    cx: 472.85738972861157
-    cy: 264.77181506420266
-
-    k1: 0.04160142651680036
-    k2: -0.04771035303381654
-    p1: -0.0032638387781624705
-    p2: -0.003985120051161831
-    k3: 0.01110263483766991
+    Q_k: 0.01           ## Error coefficient of encoder
+    R_x: 100         ## Error coefficient of observation x
+    R_y: 100          ## Error coefficient of observation y
+    R_theta: 10      ## Error coefficient of observation theta
 
 odom:
-    kl: 0.05
-    kr: 0.05
-    b: 0.09
-
-extrinsic:
-    Trc: [0.0, 0.258819, 0.965926, 0.18, -1.0, 0.0, 0.0, -0.1, 0.0, -0.965926, 0.258819, 0.0]
+    kl: 0.05    ## Left wheel radius
+    kr: 0.05    ## Right wheel radius
+    b: 0.09     ## Half of robot wheelbase
 
 aruco:
-    n_markers: 30
-    marker_size: 4
-    markers_dictionary: 16
-    marker_length: 0.27  
+    markers_dictionary: 16 ## cv::aruco::PREDEFINED_DICTIONARY_NAME
+    marker_length: 0.27    ## Length of the aruco markers, without the white edge, the unit is a meter
 
 frame:
-    world: "world"
-    camera: "camera_frame_optical"
+    world_frame: "world"                                ##Galobal frame name
+    camera_frame_optical: "camera_frame_optical"        ##Image frame name
+    robot_frame_base: "base_link"                       ##Robot base link frame name
 
-map:
-    map_file: "/home/liangyichen/catkin_ws/src/aruco_slam/map/map.txt"
+topic:
+    image: /camera/image_raw    ## Subscribed topic for image msg including image sensor_msgs::ImageConstPtr and camera info sensor_msgs::CameraInfoConstPtr
+    encoder: /encoder           ## Subscribed topic for encoder msg including vector with two wheels' anguler valocity std_msgs::Float32MultiArray::ConstPtr
+
+# map: 
+#     map_file: "/home/liangyichen/catkin_ws/src/aruco_slam/map/map.txt" #Direction of map file with accurate information of real map
+const:
+    USEFUL_DISTANCE_THRESHOLD: 4
 
 
 

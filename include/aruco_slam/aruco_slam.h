@@ -1,3 +1,22 @@
+/** \file     	aruco_slam.h
+ *  \author   	Yichen Liang (liangyichen666@gmail.com)
+ *  \copyright  GNU General Public License (GPL)
+ *  \brief   	Universal Synchronous/Asynchronous Receiver/Transmitter
+ *  \version	V0.01
+ *  \date    	07-OCT-2022
+ *  \note
+ *  This file is part of Arcuo_Slam.                                            \n
+ *  This program is free software; you can redistribute it and/or modify 		\n
+ *  it under the terms of the GNU General Public License version 3 as 		    \n
+ *  published by the Free Software Foundation.                               	\n
+ *  You should have received a copy of the GNU General Public License   		\n
+ *  along with OST. If not, see <http://www.gnu.org/licenses/>.       			\n
+ *  Unless required by applicable law or agreed to in writing, software       	\n
+ *  distributed under the License is distributed on an "AS IS" BASIS,         	\n
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  	\n
+ *  See the License for the specific language governing permissions and     	\n
+ *  limitations under the License.   											\n
+ */
 #ifndef ARUCO_SLAM_H
 #define ARUCO_SLAM_H
 
@@ -8,116 +27,169 @@
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <geometry_msgs/Pose.h>
+#include <geometry_msgs/PoseArray.h>
 
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include <tf2_eigen/tf2_eigen.h>
 
-void fillTransform(tf2::Transform &transform_, const cv::Vec3d &rvec, const cv::Vec3d &tvec);
+/** \struct
+ *  \brief Date loaded form parameter.yaml file for ArucoSlam class
+ */
+struct ArucoSlamIniteData
+{
+    double Q_k,                                           /**< Error coefficient of encoder */
+        R_x,                                              /**< Error coefficient of observation x */
+        R_y,                                              /**< Error coefficient of observation y */
+        R_theta;                                          /**< Error coefficient of observation y */
+    double kl,                                            /**< Left wheel radius */
+        kr,                                               /**< Right wheel radius */
+        b;                                                /**< Half of robot wheelbase */
+    int markers_dictionary;                               /**< \enum cv::aruco::PREDEFINED_DICTIONARY_NAME */
+    double marker_length;                                 /**< Length of the aruco markers */
+    std::string world_frame,                              /**< Galobal frame name */
+        camera_frame_optical,                             /**< Image frame name */
+        robot_frame_base;                                 /**< Robot base link frame name */
+    std::string image_topic_name,                         /**< Subscribed topic for image msg */
+        encoder_topic_name;                               /**< Subscribed topic for encoder msg */
+    std::string map_f;                                    /**< Direction of map file */
+    geometry_msgs::TransformStamped transformStamped_r2c; /**< Calculated transfor matrix for robot base to camera optical */
+    float USEFUL_DISTANCE_THRESHOLD=3;
 
-class Observation
+};
+
+/** \class ArucoMarker aruco_slam.h "include/aruco_slam.h"
+ *  \brief This is a class for markers.
+ *
+ *  Every real object has a uniqu aruco_id and aruco_index.
+ */
+class ArucoMarker
 {
 public:
-    Observation() {}
-    Observation(const int &aruco_id, const double &x, const double &y, const Eigen::Matrix2d &covariance) : aruco_id_(aruco_id), x_(x), y_(y), covariance_(covariance) {}
-    Eigen::Matrix2d covariance_;
+    ArucoMarker() {}
+    ArucoMarker(const int &aruco_id, const double &x, const double &y, const double &theta, const Eigen::Matrix3d &observe_covariance)
+        : aruco_id_(aruco_id), x_(x), y_(y), theta_(theta), observe_covariance_(observe_covariance), aruco_index_(-1) {}
+
     int aruco_id_;
+    int aruco_index_;
     double x_;
     double y_;
-}; // class Observation
+    double theta_;
+    Eigen::Matrix3d observe_covariance_;
+    Eigen::Vector3d last_observation_; /**< Value of last observation contain delta_x, delta_y, delta_theta */
+    /**
+     * @brief used for the sort of the detected markers, the markers will be sorted according to
+     * the sequence of been added to the map
+     */
+    friend bool operator<(const ArucoMarker &a, const ArucoMarker &b)
+    {
+        return a.aruco_index_ > b.aruco_index_;
+    }
 
+    friend bool operator==(const ArucoMarker &a, const ArucoMarker &b)
+    {
+        return a.aruco_id_ == b.aruco_id_;
+    }
+};
+
+/** \class ArucoSlam aruco_slam.h "include/aruco_slam.h"
+ *  \brief This is main class for aruco slam.
+ *
+ *  detailed description
+ */
 class ArucoSlam
 {
 public:
-    ArucoSlam(const cv::Mat &K, const cv::Mat &dist,
-                      const double &kl, const double kr, const double &b,
-                      const geometry_msgs::TransformStamped &transformStamped_r2c,
-                      const double &k, const double &k_r, const double k_phi,
-                      const int &markers_dictionary, const double &marker_length);
-    /*parameters
-    cv::Mat         K
-    cv::Mat         dist
-    double          kl, kr           小车左右轮的半径
-    double          b                小车底盘的一半距离(m)
-    Eigen::Matrix4d T_r_c            相机与机器人的相对位姿 机器人->相机
-    geometry_msgs::TransformStamped transformStamped_r2c 相机与机器人的相对位姿 机器人->相机
-    double          k
-    double          k_r             相机观测误差和距离的系数
-    double          k_phi           相机观测误差和角度的系数
-    int             DICTIONARY_NUM  Opencv aruco 预定以字典的编号
-    double          marker_length   Aruco markers的大小(m)
-    */
-    void addEncoder(const double &el, const double &er); //加入编码器数据进行运动更新
-    void addImage(const cv::Mat &img);                   // 加入图像数据进行观测更新
-    void loadMap(std::string filename);
-
-    visualization_msgs::MarkerArray toRosMarkers(double scale); //将路标点转换成ROS的marker格式，用于发布显示
-    geometry_msgs::PoseWithCovarianceStamped toRosPose();       //将机器人位姿转化成ROS的pose格式，用于发布显示
-
-    Eigen::MatrixXd &mu() { return mu_; }
-    Eigen::MatrixXd &sigma() { return sigma_; }
-    cv::Mat markedImg() { return marker_img_; }
-
-    visualization_msgs::MarkerArray detectedMAParray_;
-    visualization_msgs::MarkerArray get_mapmarkerarray() { return mapmarkerarray_; }
-    visualization_msgs::MarkerArray get_detectedmarkerarray() { return detectedmarkerarray_; }
-    void setcameraparameters(const cv::Mat &camera_matrix, const cv::Mat &dist_coeffs)
+    /**
+     * @brief Construct a new Aruco Slam object
+     *
+     * @param inite_data
+     */
+    ArucoSlam(const struct ArucoSlamIniteData &inite_data);
+    /**
+     * @brief add encoder data and update
+     *
+     * @param el
+     * @param er
+     */
+    void addEncoder(const double &el, const double &er);
+    /**
+     * @brief add image data and update
+     *
+     * @param img
+     */
+    void addImage(const cv::Mat &img);
+    /**
+     * @brief Set the Camera Parameters object
+     *
+     * set camera projection matrix and distortion coefficients of the lens.
+     * @param cameraparameters std::pair<cv::Mat, cv::Mat>
+     */
+    void setCameraParameters(const std::pair<cv::Mat, cv::Mat> &cameraparameters)
     {
-        camera_matrix_ = camera_matrix;
-        dist_coeffs_ = dist_coeffs;
+        camera_matrix_ = cameraparameters.first;
+        dist_coeffs_ = cameraparameters.second;
     }
+    /**
+     * @brief get the markers that have been added to the map, for visualization.
+     *
+     * @return visualization_msgs::MarkerArray
+     */
+    visualization_msgs::MarkerArray toRosMappedMarkers() { return detected_map_; };
+    /**
+     * @brief get the markers that been used for the EKF correction, for visualization in rviz.
+     *
+     * @return visualization_msgs::MarkerArray
+     */
+    visualization_msgs::MarkerArray toRosDetectedMarkers() { return detected_markers_; };
+    /**
+     * @brief get current pose of the robot with pose covariance, for visulization.
+     *
+     * @return geometry_msgs::PoseWithCovarianceStamped
+     */
+    geometry_msgs::PoseWithCovarianceStamped toRosPose();
+    cv::Mat getMarkedImg() { return markered_img_; }
 
 private:
-    int getObservations(const cv::Mat &img, std::vector<Observation> &obs);
+    void fillTransform(tf2::Transform &transform_, const cv::Vec3d &rvec, const cv::Vec3d &tvec);
+
+    Eigen::VectorXd mu() { return mu_; }
+    Eigen::MatrixXd sigma() { return sigma_; }
+
+    int getObservations(const cv::Mat &img);
     void normAngle(double &angle);
     bool checkLandmark(const int &aruco_id, int &landmark_idx);
     void clearMarkers();
-    std::map<int, int> aruco_id_map; //pair<int, int>{aruco_id, position_i}
-
-    bool CYLINDERmarker_generate(int id, double x, double y, double z, visualization_msgs::Marker &marker_, std_msgs::ColorRGBA color, ros::Duration lifetime);
-    bool marker_generate(int id, double length, double x, double y, double z, tf2::Quaternion q,
-                         visualization_msgs::Marker &marker_, std_msgs::ColorRGBA color, ros::Duration lifetime = ros::Duration(0));
-    void addMarker(int id, double length, double x, double y, double z,
-                   double yaw, double pitch, double roll);
-    void calculate_covariance(const cv::Vec3d &tvec, const cv::Vec3d &rvec, const std::vector<cv::Point2f> &marker_corners, Eigen::Matrix2d &covariance);
-    /* 系统状态 */
+    std::map<int, int> aruco_id_map; // pair<int, int>{aruco_id, position_i}
+    bool GenerateMarker(int id, double length, double x, double y, double z, tf2::Quaternion q,
+                        visualization_msgs::Marker &marker_, std_msgs::ColorRGBA color, ros::Duration lifetime = ros::Duration(0));
+    void CalculateCovariance(const cv::Vec3d &tvec, const cv::Vec3d &rvec, const std::vector<cv::Point2f> &marker_corners, Eigen::Matrix3d &covariance);
     bool is_init_;
-
-    /* 系统配置参数 */
-    cv::Mat K_, dist_;   //　相机内参数
-    double kl_, kr_, b_; // 里程计参数
-    // Eigen::Matrix4d T_r_c_;                              // 机器人外参数
+    /** Parameters */
+    cv::Mat camera_matrix_, dist_coeffs_; /**< Camera parameters*/
+    cv::Mat K_, dist_;
+    double kl_, kr_, b_; /**< Robot parameters */
     geometry_msgs::TransformStamped transformStamped_r2c_;
-    double k_;     // 里程计协方差参数
-    double k_r_;   // 观测协方差参数
-    double k_phi_; // 观测协方差参数
-
-    int markers_dictionary_;
+    int markers_dictionary_; /**< Markers parameters*/
     double marker_length_;
     cv::Ptr<cv::aruco::Dictionary> dictionary_;
-    cv::Mat marker_img_;
-
-    /* 上一帧的编码器读数 */
-    double last_enl_, last_enr_;
+    double Q_k_;                 /**< Error coefficient of encoder */
+    double R_x_, R_y_, R_theta_; /**< Error coefficient of observation */
+    double last_enl_, last_enr_; /**< Encoder data recoder */
     ros::Time last_time_;
-
-    /* 求解的扩展状态 均值 和 协方差 */
-    Eigen::MatrixXd mu_;         //均值
-    Eigen::MatrixXd sigma_;      //方差
-    std::vector<int> aruco_ids_; //对应于每个路标的aruco码id
-
-    // cv::Ptr<cv::aruco::Board> board_;
-    std::map<int, tf2::Vector3> myMap_;
-    visualization_msgs::MarkerArray mapmarkerarray_;
-    visualization_msgs::MarkerArray detectedmarkerarray_;
-
-    cv::Ptr<cv::aruco::DetectorParameters> parameters_;
-    cv::Mat camera_matrix_, dist_coeffs_;
-    int N_;
-
+    int N_;                      /**< Number of markers in the map */
+    Eigen::VectorXd mu_;         /**< Mean of state 3+n*3 */
+    Eigen::MatrixXd sigma_;      /**< Covariance of state */
+    std::vector<int> aruco_ids_; /**< Ids of markers in the map */
+    cv::Mat markered_img_;       /**< Image with markered detected markers */
+    visualization_msgs::MarkerArray detected_map_;
+    visualization_msgs::MarkerArray detected_markers_;
+    std::vector<ArucoMarker> last_observed_marker_;
     std::vector<cv::Point3f> objectPoints_ = {cv::Vec3f(-marker_length_ / 2.f, marker_length_ / 2.f, 0), cv::Vec3f(marker_length_ / 2.f, marker_length_ / 2.f, 0), cv::Vec3f(marker_length_ / 2.f, -marker_length_ / 2.f, 0), cv::Vec3f(-marker_length_ / 2.f, -marker_length_ / 2.f, 0)};
+    std::priority_queue<ArucoMarker> obs_; /**< record detected markers in order of map */
+    float USEFUL_DISTANCE_THRESHOLD_;
 
-}; // class ArucoSlam
+};
 
 #endif
